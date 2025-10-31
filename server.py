@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 import json
 import threading
 import os
+from typing import List, Optional
 
 app = FastAPI(title="Sensor Data API", version="1.0.0")
 
@@ -52,6 +53,14 @@ class SensorData(BaseModel):
             }
         }
 
+# Pydantic model for sensor reading response (includes record ID)
+class SensorReading(BaseModel):
+    id: int = Field(..., description="Database record ID")
+    sensor_id: str = Field(..., description="Unique identifier for the sensor")
+    device_id: str = Field(..., description="Unique identifier for the device")
+    timestamp: datetime = Field(..., description="Timestamp of the reading")
+    temp_value: float = Field(..., description="Temperature value")
+
 def get_db_connection():
     """Create and return a database connection"""
     try:
@@ -85,6 +94,62 @@ def insert_sensor_data(data: SensorData):
         
     except Error as e:
         print(f"Error inserting data: {e}")
+        if connection:
+            connection.close()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+def get_latest_readings(sensor_id: str, limit: int = 10):
+    """Retrieve latest N readings for a specific sensor"""
+    connection = get_db_connection()
+    if connection is None:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        query = """
+            SELECT id, sensor_id, device_id, timestamp, temp_value
+            FROM sensor_data
+            WHERE sensor_id = %s
+            ORDER BY timestamp DESC, id DESC
+            LIMIT %s
+        """
+        cursor.execute(query, (sensor_id, limit))
+        results = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        return results
+        
+    except Error as e:
+        print(f"Error retrieving data: {e}")
+        if connection:
+            connection.close()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+def get_all_sensors():
+    """Retrieve list of unique sensor IDs"""
+    connection = get_db_connection()
+    if connection is None:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    
+    try:
+        cursor = connection.cursor()
+        query = """
+            SELECT DISTINCT sensor_id
+            FROM sensor_data
+            ORDER BY sensor_id
+        """
+        cursor.execute(query)
+        results = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        connection.close()
+        
+        return results
+        
+    except Error as e:
+        print(f"Error retrieving sensors: {e}")
         if connection:
             connection.close()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
@@ -187,6 +252,40 @@ async def submit_sensor_data(data: SensorData):
         }
     }
 
+# GET endpoint to retrieve latest readings for a specific sensor
+@app.get("/sensors/{sensor_id}/readings", response_model=List[SensorReading])
+async def get_sensor_readings(
+    sensor_id: str,
+    limit: int = Query(default=10, ge=1, le=100, description="Number of readings to retrieve")
+):
+    """
+    Get the latest N readings for a specific sensor (default: 10, max: 100)
+    
+    Example: /sensors/sensor1/readings?limit=10
+    """
+    readings = get_latest_readings(sensor_id, limit)
+    
+    if not readings:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No readings found for sensor: {sensor_id}"
+        )
+    
+    return readings
+
+# GET endpoint to retrieve list of all sensors
+@app.get("/sensors", response_model=List[str])
+async def list_sensors():
+    """
+    Get a list of all unique sensor IDs that have recorded data
+    """
+    sensors = get_all_sensors()
+    
+    if not sensors:
+        return []
+    
+    return sensors
+
 @app.get("/")
 async def root():
     """Root endpoint to check if API is running"""
@@ -195,6 +294,8 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "POST /data": "Submit sensor data",
+            "GET /sensors": "List all sensors",
+            "GET /sensors/{sensor_id}/readings": "Get latest readings for a sensor",
             "GET /docs": "API documentation"
         }
     }
