@@ -10,9 +10,13 @@ import threading
 import os
 from typing import List, Optional
 
-app = FastAPI(title="Sensor Data API", version="1.0.0")
+app = FastAPI(
+    title="Sensor Data API", 
+    version="1.0.0",
+    description="API for collecting and retrieving sensor data via REST and MQTT"
+)
 
-# Add CORS middleware
+# Enhanced CORS middleware for Coolify deployment
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,6 +40,10 @@ MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
 MQTT_TOPIC = os.getenv('MQTT_TOPIC', 'sensor/data')
 MQTT_CLIENT_ID = os.getenv('MQTT_CLIENT_ID', 'sensor_server')
 
+# Global MQTT client variable
+mqtt_client = None
+mqtt_connected = False
+
 # Pydantic model for sensor data
 class SensorData(BaseModel):
     sensor_id: str = Field(..., description="Unique identifier for the sensor")
@@ -49,7 +57,7 @@ class SensorData(BaseModel):
             "example": {
                 "sensor_id": "SENSOR001",
                 "device_id": "DEVICE123",
-                "timestamp": "2025-10-22T10:30:00",
+                "timestamp": "2025-11-18T10:30:00",
                 "temp_value": 23.5,
                 "humidity": 65.2
             }
@@ -160,13 +168,16 @@ def get_all_sensors():
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
     """Callback when connected to MQTT broker"""
+    global mqtt_connected
     if rc == 0:
-        print("\n✓ Connected to MQTT Broker successfully!")
+        mqtt_connected = True
+        print("✅ Connected to MQTT Broker successfully!")
         # Subscribe to the sensor data topic
         client.subscribe(MQTT_TOPIC, qos=1)
-        print(f"✓ Subscribed to topic: {MQTT_TOPIC}\n")
+        print(f"✅ Subscribed to topic: {MQTT_TOPIC}")
     else:
-        print(f"✗ Failed to connect to MQTT Broker. Return code: {rc}")
+        mqtt_connected = False
+        print(f"❌ Failed to connect to MQTT Broker. Return code: {rc}")
 
 def on_message(client, userdata, msg):
     """Callback when a message is received from MQTT"""
@@ -175,7 +186,8 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode())
         
         # Convert timestamp string to datetime object
-        payload['timestamp'] = datetime.fromisoformat(payload['timestamp'])
+        if isinstance(payload['timestamp'], str):
+            payload['timestamp'] = datetime.fromisoformat(payload['timestamp'].replace('Z', '+00:00'))
         
         # Create SensorData object
         sensor_data = SensorData(**payload)
@@ -184,195 +196,49 @@ def on_message(client, userdata, msg):
         record_id = insert_sensor_data(sensor_data)
         
         # Print received data to console
-        print("\n" + "="*50)
-        print("SENSOR DATA RECEIVED VIA MQTT:")
-        print("="*50)
-        print(f"Record ID:    {record_id}")
-        print(f"Sensor ID:    {sensor_data.sensor_id}")
-        print(f"Device ID:    {sensor_data.device_id}")
-        print(f"Timestamp:    {sensor_data.timestamp}")
-        print(f"Temperature:  {sensor_data.temp_value}°C")
-        print(f"Humidity:     {sensor_data.humidity}%")
-        print("="*50 + "\n")
+        print(f"\n📡 MQTT DATA RECEIVED - Record ID: {record_id}")
+        print(f"   Sensor: {sensor_data.sensor_id} | Device: {sensor_data.device_id}")
+        print(f"   Temp: {sensor_data.temp_value}°C | Humidity: {sensor_data.humidity}%")
         
     except json.JSONDecodeError as e:
-        print(f"✗ Error decoding JSON: {e}")
+        print(f"❌ Error decoding JSON: {e}")
     except Exception as e:
-        print(f"✗ Error processing message: {e}")
+        print(f"❌ Error processing MQTT message: {e}")
 
 def on_disconnect(client, userdata, rc):
     """Callback when disconnected from MQTT broker"""
+    global mqtt_connected
+    mqtt_connected = False
     if rc != 0:
-        print("✗ Unexpected disconnection from MQTT Broker")
+        print("❌ Unexpected disconnection from MQTT Broker")
 
 def start_mqtt_client():
-    """Initialize and start MQTT client in a separate thread"""
-    mqtt_client = mqtt.Client(client_id=MQTT_CLIENT_ID)
-    
-    # Set callbacks
-    mqtt_client.on_connect = on_connect
-    mqtt_client.on_message = on_message
-    mqtt_client.on_disconnect = on_disconnect
+    """Initialize and start MQTT client"""
+    global mqtt_client
     
     try:
-        print(f"Connecting to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}...")
+        mqtt_client = mqtt.Client(client_id=MQTT_CLIENT_ID)
+        
+        # Set callbacks
+        mqtt_client.on_connect = on_connect
+        mqtt_client.on_message = on_message
+        mqtt_client.on_disconnect = on_disconnect
+        
+        print(f"🔌 Connecting to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}...")
         mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
         
         # Start the MQTT loop in a separate thread
         mqtt_client.loop_start()
         
     except Exception as e:
-        print(f"✗ Failed to connect to MQTT Broker: {e}")
+        print(f"❌ Failed to connect to MQTT Broker: {e}")
 
-# POST endpoint to receive sensor data (REST API fallback)
-@app.post("/data", status_code=201)
-async def submit_sensor_data(data: SensorData):
-    """
-    Submit new sensor data and store in MySQL database (REST API endpoint)
-    """
-    # Insert data into database
-    record_id = insert_sensor_data(data)
-    
-    # Print received data to console
-    print("\n" + "="*50)
-    print("SENSOR DATA RECEIVED VIA REST API:")
-    print("="*50)
-    print(f"Record ID:    {record_id}")
-    print(f"Sensor ID:    {data.sensor_id}")
-    print(f"Device ID:    {data.device_id}")
-    print(f"Timestamp:    {data.timestamp}")
-    print(f"Temperature:  {data.temp_value}°C")
-    print(f"Humidity:     {data.humidity}%")
-    print("="*50 + "\n")
-    
-    return {
-        "status": "success",
-        "message": "Sensor data received and stored in database",
-        "record_id": record_id,
-        "data": {
-            "sensor_id": data.sensor_id,
-            "device_id": data.device_id,
-            "timestamp": data.timestamp.isoformat(),
-            "temp_value": data.temp_value,
-            "humidity": data.humidity
-        }
-    }
-
-# POST endpoint to receive bulk sensor data from JSON file
-@app.post("/data/bulk", status_code=201)
-async def submit_bulk_sensor_data(data_list: List[SensorData]):
-    """
-    Submit multiple sensor data records in bulk from a JSON array
-    
-    Expected JSON format:
-    [
-        {
-            "sensor_id": "SENSOR001",
-            "device_id": "DEVICE123",
-            "timestamp": "2025-10-22T10:30:00",
-            "temp_value": 23.5,
-            "humidity": 65.2
-        },
-        {
-            "sensor_id": "SENSOR002",
-            "device_id": "DEVICE124",
-            "timestamp": "2025-10-22T10:31:00",
-            "temp_value": 24.1,
-            "humidity": 62.5
-        }
-    ]
-    """
-    if not data_list:
-        raise HTTPException(status_code=400, detail="Empty data list provided")
-    
-    inserted_records = []
-    failed_records = []
-    
-    print("\n" + "="*60)
-    print(f"BULK SENSOR DATA RECEIVED: {len(data_list)} records")
-    print("="*60)
-    
-    for idx, data in enumerate(data_list, 1):
-        try:
-            # Insert data into database
-            record_id = insert_sensor_data(data)
-            
-            inserted_records.append({
-                "record_id": record_id,
-                "sensor_id": data.sensor_id,
-                "device_id": data.device_id,
-                "timestamp": data.timestamp.isoformat()
-            })
-            
-            print(f"\n✓ Record {idx}/{len(data_list)} - ID: {record_id}")
-            print(f"  Sensor: {data.sensor_id} | Device: {data.device_id}")
-            print(f"  Temp: {data.temp_value}°C | Humidity: {data.humidity}%")
-            
-        except Exception as e:
-            failed_records.append({
-                "index": idx,
-                "sensor_id": data.sensor_id,
-                "error": str(e)
-            })
-            print(f"\n✗ Record {idx}/{len(data_list)} - FAILED")
-            print(f"  Sensor: {data.sensor_id} | Error: {str(e)}")
-    
-    print("\n" + "="*60)
-    print(f"BULK INSERT COMPLETE:")
-    print(f"  Success: {len(inserted_records)}")
-    print(f"  Failed:  {len(failed_records)}")
-    print("="*60 + "\n")
-    
-    return {
-        "status": "completed",
-        "message": f"Bulk insert completed: {len(inserted_records)} successful, {len(failed_records)} failed",
-        "summary": {
-            "total_received": len(data_list),
-            "successful": len(inserted_records),
-            "failed": len(failed_records)
-        },
-        "inserted_records": inserted_records,
-        "failed_records": failed_records if failed_records else None
-    }
-
-# GET endpoint to retrieve latest readings for a specific sensor
-@app.get("/sensors/{sensor_id}/readings", response_model=List[SensorReading])
-async def get_sensor_readings(
-    sensor_id: str,
-    limit: int = Query(default=10, ge=1, le=100, description="Number of readings to retrieve")
-):
-    """
-    Get the latest N readings for a specific sensor (default: 10, max: 100)
-    
-    Example: /sensors/sensor1/readings?limit=10
-    """
-    readings = get_latest_readings(sensor_id, limit)
-    
-    if not readings:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"No readings found for sensor: {sensor_id}"
-        )
-    
-    return readings
-
-# GET endpoint to retrieve list of all sensors
-@app.get("/sensors", response_model=List[str])
-async def list_sensors():
-    """
-    Get a list of all unique sensor IDs that have recorded data
-    """
-    sensors = get_all_sensors()
-    
-    if not sensors:
-        return []
-    
-    return sensors
-
+# Root endpoint - THIS IS CRITICAL FOR COOLIFY HEALTH CHECKS
 @app.get("/")
 async def root():
-    """Root endpoint to check if API is running"""
+    """Root endpoint - Coolify health check"""
     return {
+        "status": "healthy",
         "message": "Sensor Data API is running",
         "version": "1.0.0",
         "endpoints": {
@@ -380,18 +246,23 @@ async def root():
             "POST /data/bulk": "Submit multiple sensor data records from JSON array",
             "GET /sensors": "List all sensors",
             "GET /sensors/{sensor_id}/readings": "Get latest readings for a sensor",
+            "GET /health": "Detailed health check",
             "GET /docs": "API documentation"
         }
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Detailed health check endpoint"""
     # Check database connection
     db_status = "connected"
     try:
         connection = get_db_connection()
         if connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            cursor.close()
             connection.close()
         else:
             db_status = "disconnected"
@@ -399,25 +270,164 @@ async def health_check():
         db_status = f"error: {str(e)}"
     
     return {
-        "status": "healthy",
+        "status": "healthy" if db_status == "connected" else "degraded",
         "database": db_status,
-        "mqtt_broker": MQTT_BROKER,
-        "mqtt_port": MQTT_PORT
+        "mqtt": {
+            "broker": MQTT_BROKER,
+            "port": MQTT_PORT,
+            "connected": mqtt_connected
+        },
+        "timestamp": datetime.now().isoformat()
     }
+
+# POST endpoint to receive sensor data (REST API fallback)
+@app.post("/data", status_code=201)
+async def submit_sensor_data(data: SensorData):
+    """Submit new sensor data and store in MySQL database"""
+    try:
+        # Insert data into database
+        record_id = insert_sensor_data(data)
+        
+        # Print received data to console
+        print(f"\n🌐 REST API DATA RECEIVED - Record ID: {record_id}")
+        print(f"   Sensor: {data.sensor_id} | Device: {data.device_id}")
+        print(f"   Temp: {data.temp_value}°C | Humidity: {data.humidity}%")
+        
+        return {
+            "status": "success",
+            "message": "Sensor data received and stored successfully",
+            "record_id": record_id,
+            "data": {
+                "sensor_id": data.sensor_id,
+                "device_id": data.device_id,
+                "timestamp": data.timestamp.isoformat(),
+                "temp_value": data.temp_value,
+                "humidity": data.humidity
+            }
+        }
+    
+    except Exception as e:
+        print(f"❌ Error in /data endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# POST endpoint to receive bulk sensor data from JSON file
+@app.post("/data/bulk", status_code=201)
+async def submit_bulk_sensor_data(data_list: List[SensorData]):
+    """Submit multiple sensor data records in bulk"""
+    
+    if not data_list:
+        raise HTTPException(status_code=400, detail="Empty data list provided")
+    
+    try:
+        inserted_records = []
+        failed_records = []
+        
+        print(f"\n📦 BULK DATA RECEIVED: {len(data_list)} records")
+        
+        for idx, data in enumerate(data_list, 1):
+            try:
+                # Insert data into database
+                record_id = insert_sensor_data(data)
+                
+                inserted_records.append({
+                    "record_id": record_id,
+                    "sensor_id": data.sensor_id,
+                    "device_id": data.device_id,
+                    "timestamp": data.timestamp.isoformat()
+                })
+                
+                print(f"   ✅ Record {idx}: ID {record_id} - {data.sensor_id}")
+                
+            except Exception as e:
+                failed_records.append({
+                    "index": idx,
+                    "sensor_id": data.sensor_id,
+                    "error": str(e)
+                })
+                print(f"   ❌ Record {idx}: FAILED - {str(e)}")
+        
+        print(f"📦 BULK COMPLETE: {len(inserted_records)} success, {len(failed_records)} failed")
+        
+        return {
+            "status": "completed",
+            "message": f"Bulk insert completed: {len(inserted_records)} successful, {len(failed_records)} failed",
+            "summary": {
+                "total_received": len(data_list),
+                "successful": len(inserted_records),
+                "failed": len(failed_records)
+            },
+            "inserted_records": inserted_records,
+            "failed_records": failed_records if failed_records else None
+        }
+    
+    except Exception as e:
+        print(f"❌ Error in /data/bulk endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# GET endpoint to retrieve latest readings for a specific sensor
+@app.get("/sensors/{sensor_id}/readings", response_model=List[SensorReading])
+async def get_sensor_readings(
+    sensor_id: str,
+    limit: int = Query(default=10, ge=1, le=100, description="Number of readings to retrieve")
+):
+    """Get the latest N readings for a specific sensor"""
+    try:
+        readings = get_latest_readings(sensor_id, limit)
+        
+        if not readings:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No readings found for sensor: {sensor_id}"
+            )
+        
+        return readings
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting readings for {sensor_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# GET endpoint to retrieve list of all sensors
+@app.get("/sensors", response_model=List[str])
+async def list_sensors():
+    """Get a list of all unique sensor IDs that have recorded data"""
+    try:
+        sensors = get_all_sensors()
+        return sensors
+    
+    except Exception as e:
+        print(f"❌ Error listing sensors: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
 async def startup_event():
-    """Start MQTT client when FastAPI starts"""
+    """Initialize services when FastAPI starts"""
     print("\n" + "="*60)
-    print("SENSOR DATA API SERVER STARTING")
+    print("🚀 SENSOR DATA API SERVER STARTING")
     print("="*60)
-    print(f"Database Host: {DB_CONFIG['host']}")
-    print(f"Database Name: {DB_CONFIG['database']}")
-    print(f"Database User: {DB_CONFIG['user']}")
+    print(f"Database: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     print(f"MQTT Broker: {MQTT_BROKER}:{MQTT_PORT}")
-    print("="*60 + "\n")
+    print("="*60)
+    
+    # Start MQTT client
     start_mqtt_client()
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup when FastAPI shuts down"""
+    global mqtt_client
+    if mqtt_client:
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+    print("🛑 Server shutdown complete")
+
+# For local development
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=int(os.getenv('PORT', '8000')),
+        log_level="info"
+    )
