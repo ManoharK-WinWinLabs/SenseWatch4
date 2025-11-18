@@ -42,6 +42,7 @@ class SensorData(BaseModel):
     device_id: str = Field(..., description="Unique identifier for the device")
     timestamp: datetime = Field(..., description="Timestamp of the reading")
     temp_value: float = Field(..., description="Temperature value")
+    humidity: float = Field(..., description="Humidity value")
 
     class Config:
         json_schema_extra = {
@@ -49,7 +50,8 @@ class SensorData(BaseModel):
                 "sensor_id": "SENSOR001",
                 "device_id": "DEVICE123",
                 "timestamp": "2025-10-22T10:30:00",
-                "temp_value": 23.5
+                "temp_value": 23.5,
+                "humidity": 65.2
             }
         }
 
@@ -60,6 +62,7 @@ class SensorReading(BaseModel):
     device_id: str = Field(..., description="Unique identifier for the device")
     timestamp: datetime = Field(..., description="Timestamp of the reading")
     temp_value: float = Field(..., description="Temperature value")
+    humidity: float = Field(..., description="Humidity value")
 
 def get_db_connection():
     """Create and return a database connection"""
@@ -79,10 +82,10 @@ def insert_sensor_data(data: SensorData):
     try:
         cursor = connection.cursor()
         query = """
-            INSERT INTO sensor_data (sensor_id, device_id, timestamp, temp_value)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO sensor_data (sensor_id, device_id, timestamp, temp_value, humidity)
+            VALUES (%s, %s, %s, %s, %s)
         """
-        values = (data.sensor_id, data.device_id, data.timestamp, data.temp_value)
+        values = (data.sensor_id, data.device_id, data.timestamp, data.temp_value, data.humidity)
         cursor.execute(query, values)
         connection.commit()
         
@@ -107,7 +110,7 @@ def get_latest_readings(sensor_id: str, limit: int = 10):
     try:
         cursor = connection.cursor(dictionary=True)
         query = """
-            SELECT id, sensor_id, device_id, timestamp, temp_value
+            SELECT id, sensor_id, device_id, timestamp, temp_value, humidity
             FROM sensor_data
             WHERE sensor_id = %s
             ORDER BY timestamp DESC, id DESC
@@ -189,6 +192,7 @@ def on_message(client, userdata, msg):
         print(f"Device ID:    {sensor_data.device_id}")
         print(f"Timestamp:    {sensor_data.timestamp}")
         print(f"Temperature:  {sensor_data.temp_value}°C")
+        print(f"Humidity:     {sensor_data.humidity}%")
         print("="*50 + "\n")
         
     except json.JSONDecodeError as e:
@@ -238,6 +242,7 @@ async def submit_sensor_data(data: SensorData):
     print(f"Device ID:    {data.device_id}")
     print(f"Timestamp:    {data.timestamp}")
     print(f"Temperature:  {data.temp_value}°C")
+    print(f"Humidity:     {data.humidity}%")
     print("="*50 + "\n")
     
     return {
@@ -248,8 +253,86 @@ async def submit_sensor_data(data: SensorData):
             "sensor_id": data.sensor_id,
             "device_id": data.device_id,
             "timestamp": data.timestamp.isoformat(),
-            "temp_value": data.temp_value
+            "temp_value": data.temp_value,
+            "humidity": data.humidity
         }
+    }
+
+# POST endpoint to receive bulk sensor data from JSON file
+@app.post("/data/bulk", status_code=201)
+async def submit_bulk_sensor_data(data_list: List[SensorData]):
+    """
+    Submit multiple sensor data records in bulk from a JSON array
+    
+    Expected JSON format:
+    [
+        {
+            "sensor_id": "SENSOR001",
+            "device_id": "DEVICE123",
+            "timestamp": "2025-10-22T10:30:00",
+            "temp_value": 23.5,
+            "humidity": 65.2
+        },
+        {
+            "sensor_id": "SENSOR002",
+            "device_id": "DEVICE124",
+            "timestamp": "2025-10-22T10:31:00",
+            "temp_value": 24.1,
+            "humidity": 62.5
+        }
+    ]
+    """
+    if not data_list:
+        raise HTTPException(status_code=400, detail="Empty data list provided")
+    
+    inserted_records = []
+    failed_records = []
+    
+    print("\n" + "="*60)
+    print(f"BULK SENSOR DATA RECEIVED: {len(data_list)} records")
+    print("="*60)
+    
+    for idx, data in enumerate(data_list, 1):
+        try:
+            # Insert data into database
+            record_id = insert_sensor_data(data)
+            
+            inserted_records.append({
+                "record_id": record_id,
+                "sensor_id": data.sensor_id,
+                "device_id": data.device_id,
+                "timestamp": data.timestamp.isoformat()
+            })
+            
+            print(f"\n✓ Record {idx}/{len(data_list)} - ID: {record_id}")
+            print(f"  Sensor: {data.sensor_id} | Device: {data.device_id}")
+            print(f"  Temp: {data.temp_value}°C | Humidity: {data.humidity}%")
+            
+        except Exception as e:
+            failed_records.append({
+                "index": idx,
+                "sensor_id": data.sensor_id,
+                "error": str(e)
+            })
+            print(f"\n✗ Record {idx}/{len(data_list)} - FAILED")
+            print(f"  Sensor: {data.sensor_id} | Error: {str(e)}")
+    
+    print("\n" + "="*60)
+    print(f"BULK INSERT COMPLETE:")
+    print(f"  Success: {len(inserted_records)}")
+    print(f"  Failed:  {len(failed_records)}")
+    print("="*60 + "\n")
+    
+    return {
+        "status": "completed",
+        "message": f"Bulk insert completed: {len(inserted_records)} successful, {len(failed_records)} failed",
+        "summary": {
+            "total_received": len(data_list),
+            "successful": len(inserted_records),
+            "failed": len(failed_records)
+        },
+        "inserted_records": inserted_records,
+        "failed_records": failed_records if failed_records else None
     }
 
 # GET endpoint to retrieve latest readings for a specific sensor
@@ -293,7 +376,8 @@ async def root():
         "message": "Sensor Data API is running",
         "version": "1.0.0",
         "endpoints": {
-            "POST /data": "Submit sensor data",
+            "POST /data": "Submit single sensor data record",
+            "POST /data/bulk": "Submit multiple sensor data records from JSON array",
             "GET /sensors": "List all sensors",
             "GET /sensors/{sensor_id}/readings": "Get latest readings for a sensor",
             "GET /docs": "API documentation"
