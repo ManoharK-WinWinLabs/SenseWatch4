@@ -1,453 +1,619 @@
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from datetime import datetime
-import mysql.connector
-from mysql.connector import Error
-import paho.mqtt.client as mqtt
-import json
-import threading
-import os
-from typing import List, Optional
-from pathlib import Path
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SensorWatch Dashboard</title>
 
-app = FastAPI(
-    title="Sensor Data API", 
-    version="1.0.0",
-    description="API for collecting and retrieving sensor data via REST and MQTT"
-)
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Chart.js for graphing -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-# Enhanced CORS middleware for Coolify deployment
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Database configuration - Use environment variables
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'root'),
-    'database': os.getenv('DB_NAME', 'default'),
-    'port': int(os.getenv('DB_PORT', '3306'))
-}
-
-# MQTT Configuration - Use environment variables
-MQTT_BROKER = os.getenv('MQTT_BROKER', 'localhost')
-MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
-MQTT_TOPIC = os.getenv('MQTT_TOPIC', 'sensor/data')
-MQTT_CLIENT_ID = os.getenv('MQTT_CLIENT_ID', 'sensor_server')
-
-# Global MQTT client variable
-mqtt_client = None
-mqtt_connected = False
-
-# Pydantic model for sensor data
-class SensorData(BaseModel):
-    sensor_id: str = Field(..., description="Unique identifier for the sensor")
-    device_id: str = Field(..., description="Unique identifier for the device")
-    timestamp: datetime = Field(..., description="Timestamp of the reading")
-    temp_value: float = Field(..., description="Temperature value")
-    humidity: float = Field(..., description="Humidity value")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "sensor_id": "SENSOR001",
-                "device_id": "DEVICE123",
-                "timestamp": "2025-11-18T10:30:00",
-                "temp_value": 23.5,
-                "humidity": 65.2
-            }
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            limegreen: '#98F190',
+            darkaccent: '#1E1F25',
+            lightgrey: '#40424f',
+            pinkaccent: '#FB7A7C',
+            lightred: '#610002',
+            yellowbtn: '#EFFF7C',
+            deepblack: '#09090B',
+            greenbtntext: '#00361C'
+          }
         }
+      }
+    }
+  </script>
 
-# Pydantic model for sensor reading response (includes record ID)
-class SensorReading(BaseModel):
-    id: int = Field(..., description="Database record ID")
-    sensor_id: str = Field(..., description="Unique identifier for the sensor")
-    device_id: str = Field(..., description="Unique identifier for the device")
-    timestamp: datetime = Field(..., description="Timestamp of the reading")
-    temp_value: float = Field(..., description="Temperature value")
-    humidity: float = Field(..., description="Humidity value")
-
-def get_db_connection():
-    """Create and return a database connection"""
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        print(f"Error connecting to MySQL: {e}")
-        return None
-
-def insert_sensor_data(data: SensorData):
-    """Insert sensor data into MySQL database"""
-    connection = get_db_connection()
-    if connection is None:
-        raise HTTPException(status_code=500, detail="Database connection failed")
+  <!-- GSAP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+  
+  <style>
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.8);
+    }
     
-    try:
-        cursor = connection.cursor()
-        query = """
-            INSERT INTO sensor_data (sensor_id, device_id, timestamp, temp_value, humidity)
-            VALUES (%s, %s, %s, %s, %s)
-        """
-        values = (data.sensor_id, data.device_id, data.timestamp, data.temp_value, data.humidity)
-        cursor.execute(query, values)
-        connection.commit()
-        
-        record_id = cursor.lastrowid
-        cursor.close()
-        connection.close()
-        
-        return record_id
-        
-    except Error as e:
-        print(f"Error inserting data: {e}")
-        if connection:
-            connection.close()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-def get_latest_readings(sensor_id: str, limit: int = 10):
-    """Retrieve latest N readings for a specific sensor"""
-    connection = get_db_connection()
-    if connection is None:
-        raise HTTPException(status_code=500, detail="Database connection failed")
+    .modal-content {
+      background-color: #1E1F25;
+      margin: 2% auto;
+      padding: 30px;
+      border-radius: 15px;
+      width: 90%;
+      max-width: 1200px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
     
-    try:
-        cursor = connection.cursor(dictionary=True)
-        query = """
-            SELECT id, sensor_id, device_id, timestamp, temp_value, humidity
-            FROM sensor_data
-            WHERE sensor_id = %s
-            ORDER BY timestamp DESC, id DESC
-            LIMIT %s
-        """
-        cursor.execute(query, (sensor_id, limit))
-        results = cursor.fetchall()
-        
-        cursor.close()
-        connection.close()
-        
-        return results
-        
-    except Error as e:
-        print(f"Error retrieving data: {e}")
-        if connection:
-            connection.close()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-def get_all_sensors():
-    """Retrieve list of unique sensor IDs"""
-    connection = get_db_connection()
-    if connection is None:
-        raise HTTPException(status_code=500, detail="Database connection failed")
+    .close {
+      color: #98F190;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: color 0.3s;
+    }
     
-    try:
-        cursor = connection.cursor()
-        query = """
-            SELECT DISTINCT sensor_id
-            FROM sensor_data
-            ORDER BY sensor_id
-        """
-        cursor.execute(query)
-        results = [row[0] for row in cursor.fetchall()]
-        
-        cursor.close()
-        connection.close()
-        
-        return results
-        
-    except Error as e:
-        print(f"Error retrieving sensors: {e}")
-        if connection:
-            connection.close()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-# MQTT Callbacks
-def on_connect(client, userdata, flags, rc):
-    """Callback when connected to MQTT broker"""
-    global mqtt_connected
-    if rc == 0:
-        mqtt_connected = True
-        print("✅ Connected to MQTT Broker successfully!")
-        # Subscribe to the sensor data topic
-        client.subscribe(MQTT_TOPIC, qos=1)
-        print(f"✅ Subscribed to topic: {MQTT_TOPIC}")
-    else:
-        mqtt_connected = False
-        print(f"❌ Failed to connect to MQTT Broker. Return code: {rc}")
-
-def on_message(client, userdata, msg):
-    """Callback when a message is received from MQTT"""
-    try:
-        # Parse JSON payload
-        payload = json.loads(msg.payload.decode())
-        
-        # Convert timestamp string to datetime object
-        if isinstance(payload['timestamp'], str):
-            payload['timestamp'] = datetime.fromisoformat(payload['timestamp'].replace('Z', '+00:00'))
-        
-        # Create SensorData object
-        sensor_data = SensorData(**payload)
-        
-        # Insert into database
-        record_id = insert_sensor_data(sensor_data)
-        
-        # Print received data to console
-        print(f"\n📡 MQTT DATA RECEIVED - Record ID: {record_id}")
-        print(f"   Sensor: {sensor_data.sensor_id} | Device: {sensor_data.device_id}")
-        print(f"   Temp: {sensor_data.temp_value}°C | Humidity: {sensor_data.humidity}%")
-        
-    except json.JSONDecodeError as e:
-        print(f"❌ Error decoding JSON: {e}")
-    except Exception as e:
-        print(f"❌ Error processing MQTT message: {e}")
-
-def on_disconnect(client, userdata, rc):
-    """Callback when disconnected from MQTT broker"""
-    global mqtt_connected
-    mqtt_connected = False
-    if rc != 0:
-        print("❌ Unexpected disconnection from MQTT Broker")
-
-def start_mqtt_client():
-    """Initialize and start MQTT client"""
-    global mqtt_client
+    .close:hover,
+    .close:focus {
+      color: #FB7A7C;
+    }
     
-    try:
-        mqtt_client = mqtt.Client(client_id=MQTT_CLIENT_ID)
-        
-        # Set callbacks
-        mqtt_client.on_connect = on_connect
-        mqtt_client.on_message = on_message
-        mqtt_client.on_disconnect = on_disconnect
-        
-        print(f"🔌 Connecting to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}...")
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        
-        # Start the MQTT loop in a separate thread
-        mqtt_client.loop_start()
-        
-    except Exception as e:
-        print(f"❌ Failed to connect to MQTT Broker: {e}")
-
-# Mount static files directory (if it exists)
-static_path = Path("/app/static")
-if static_path.exists():
-    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
-
-# Root endpoint - Serve index.html or API info
-@app.get("/")
-async def root():
-    """Root endpoint - Serve dashboard or API info"""
-    # Check if index.html exists in static folder
-    index_file = Path("/app/static/index.html")
-    if index_file.exists():
-        return FileResponse(str(index_file))
+    .stat-card {
+      background: #40424f;
+      padding: 12px 24px;
+      border-radius: 9px;
+      text-align: center;
+      min-width: 110px;
+      border-left: 3px solid #98F190;
+    }
     
-    # Fallback to API info
-    return {
-        "status": "healthy",
-        "message": "Sensor Data API is running",
-        "version": "1.0.0",
-        "endpoints": {
-            "POST /data": "Submit single sensor data record",
-            "POST /data/bulk": "Submit multiple sensor data records from JSON array",
-            "GET /sensors": "List all sensors",
-            "GET /sensors/{sensor_id}/readings": "Get latest readings for a sensor",
-            "GET /health": "Detailed health check",
-            "GET /docs": "API documentation"
+    .stat-label {
+      font-size: 13px;
+      color: #a0aec0;
+      text-transform: uppercase;
+    }
+    
+    .stat-value {
+      font-size: 1.55rem;
+      font-weight: bold;
+      color: #98F190;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body class="bg-deepblack text-white font-sans">
+  <div class="flex h-screen">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-darkaccent p-6">
+      <h1 class="text-2xl font-bold mb-6">SensorWatch</h1>
+
+      <!-- Add a class for GSAP targeting -->
+      <div class="space-y-4">
+        <div class="bg-lightgrey text-white p-4 rounded-xl notification-item opacity-0 translate-y-4">
+          <p class="font-bold text-lg">Freezer A</p>
+          <p class="text-sm text-white">Temp dropped below range</p>
+          <p class="text-xs text-white mt-1">🕒 12:23 • 30 min ago</p>
+        </div>
+
+        <div class="bg-lightgrey text-white p-4 rounded-xl notification-item opacity-0 translate-y-4">
+          <p class="font-bold text-lg">Oven B</p>
+          <p class="text-sm text-white">Temp dropped below range</p>
+          <p class="text-xs text-white mt-1">🕒 12:23 • 30 min ago</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8 overflow-y-auto">
+      <!-- Top Bar -->
+      <div class="flex justify-between items-center mb-6">
+        <div class="flex gap-4">
+          <div class="bg-limegreen text-greenbtntext px-6 py-4 rounded-xl text-center">
+            <p class="text-4xl font-extrabold" id="active-sensors-count">--</p>
+            <p class="font-semibold">Active Sensors</p>
+          </div>
+          <div class="bg-pinkaccent text-lightred px-6 py-4 rounded-xl text-center">
+            <p class="text-4xl font-extrabold">3</p>
+            <p class="font-semibold">Sensor Warnings</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <button class="text-white">🔔</button>
+          <button class="text-white">💬</button>
+          <img src="https://via.placeholder.com/40" class="rounded-full w-10 h-10" alt="Profile" />
+        </div>
+      </div>
+
+      <!-- Devices Section -->
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-2xl font-bold">Devices</h2>
+        <div class="flex gap-2">
+          <input type="text" placeholder="Search sensors" class="bg-lightgrey text-white px-3 py-2 rounded placeholder-gray-400 focus:outline-none">
+          <select class="bg-lightgrey text-white rounded px-3 py-2">
+            <option>Location-Room</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Sensor Cards Grid -->
+      <div id="sensor-grid" class="grid grid-cols-2 xl:grid-cols-3 gap-6">
+        <!-- Loading state -->
+        <div class="col-span-full text-center text-gray-400 py-8">
+          <p>Loading sensors...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Sensor Detail Modal -->
+  <div id="sensorModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeSensorModal()">&times;</span>
+      <h2 class="text-2xl font-bold text-limegreen mb-4" id="modalSensorTitle">Sensor Details</h2>
+      
+      <div class="flex gap-4 mb-6">
+        <input type="number" id="limitInput" value="20" min="1" max="100" 
+               placeholder="Number of readings"
+               class="bg-lightgrey text-white px-4 py-2 rounded placeholder-gray-400 focus:outline-none">
+        <button class="bg-limegreen text-greenbtntext px-6 py-2 rounded-lg font-semibold hover:opacity-90" 
+                onclick="refreshSensorGraph()">🔄 Refresh</button>
+        <button class="bg-yellowbtn text-black px-6 py-2 rounded-lg font-semibold hover:opacity-90" 
+                onclick="toggleAutoRefresh()">⏱️ Auto Refresh (30s)</button>
+      </div>
+      
+      <div id="modalStatus" class="mb-4 text-center p-3 rounded"></div>
+      
+      <div style="height: 400px; margin-bottom: 20px;">
+        <canvas id="sensorChart"></canvas>
+      </div>
+      
+      <div class="flex justify-center flex-wrap gap-6" id="stats"></div>
+    </div>
+  </div>
+
+  <!-- JavaScript -->
+  <script>
+    // API endpoints - Using full domain URLs
+    const SENSOR_LIST_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
+    const SENSOR_READINGS_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
+
+    // Global variables for graph
+    let currentSensorId = null;
+    let chart = null;
+    let autoRefreshInterval = null;
+
+    // Fetch latest reading for a sensor
+    async function fetchLatestReading(sensorId) {
+      try {
+        const response = await fetch(`${SENSOR_READINGS_URL}/${sensorId}/readings?limit=20`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+        
+        const readings = await response.json();
+        
+        // Return the first (latest) reading
+        if (readings && readings.length > 0) {
+          return readings[0];
+        }
+        
+        return null;
+      } catch (error) {
+        console.error(`Error fetching readings for ${sensorId}:`, error);
+        return null;
+      }
     }
 
-@app.get("/health")
-async def health_check():
-    """Detailed health check endpoint"""
-    # Check database connection
-    db_status = "connected"
-    try:
-        connection = get_db_connection()
-        if connection:
-            cursor = connection.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-            cursor.close()
-            connection.close()
-        else:
-            db_status = "disconnected"
-    except Exception as e:
-        db_status = f"error: {str(e)}"
-    
-    return {
-        "status": "healthy" if db_status == "connected" else "degraded",
-        "database": db_status,
-        "mqtt": {
-            "broker": MQTT_BROKER,
-            "port": MQTT_PORT,
-            "connected": mqtt_connected
+    // Format the sensor reading value
+    function formatSensorValue(reading) {
+      if (!reading) {
+        return '--';
+      }
+      
+      // Check for temp_value field from your API
+      if (reading.temp_value !== undefined) {
+        return `${reading.temp_value.toFixed(1)}°F`;
+      }
+      
+      // Fallback to other common field names
+      if (reading.temperature !== undefined) {
+        return `${reading.temperature.toFixed(1)}°F`;
+      } else if (reading.temp !== undefined) {
+        return `${reading.temp.toFixed(1)}°F`;
+      } else if (reading.humidity !== undefined) {
+        return `${reading.humidity.toFixed(1)}%`;
+      } else if (reading.value !== undefined) {
+        const val = reading.value;
+        if (typeof val === 'number') {
+          return val.toFixed(1);
+        }
+        return val;
+      } else if (reading.reading !== undefined) {
+        const val = reading.reading;
+        if (typeof val === 'number') {
+          return val.toFixed(1);
+        }
+        return val;
+      }
+      
+      // If no known field, return the first numeric value found
+      for (const key in reading) {
+        if (typeof reading[key] === 'number' && key !== 'id') {
+          return reading[key].toFixed(1);
+        }
+      }
+      
+      return '--';
+    }
+
+    // Fetch and display sensors
+    async function fetchAndDisplaySensors() {
+      try {
+        const response = await fetch(SENSOR_LIST_URL);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const sensorIds = await response.json();
+        
+        // Update active sensor count
+        document.getElementById('active-sensors-count').textContent = sensorIds.length;
+        
+        // Generate sensor cards
+        const sensorGrid = document.getElementById('sensor-grid');
+        sensorGrid.innerHTML = ''; // Clear loading message
+        
+        // Create cards and fetch readings for each sensor
+        const cardPromises = sensorIds.map(async (sensorId, index) => {
+          const latestReading = await fetchLatestReading(sensorId);
+          return createSensorCard(sensorId, latestReading);
+        });
+        
+        // Wait for all cards to be created
+        const cards = await Promise.all(cardPromises);
+        
+        // Append all cards to the grid
+        cards.forEach(card => {
+          sensorGrid.appendChild(card);
+        });
+        
+        // Initialize GSAP animations after cards are created
+        initializeAnimations();
+        
+      } catch (error) {
+        console.error('Error fetching sensors:', error);
+        document.getElementById('sensor-grid').innerHTML = `
+          <div class="col-span-full text-center text-pinkaccent py-8">
+            <p>Unable to load sensors. Please check the API endpoint.</p>
+            <p class="text-sm text-gray-400 mt-2">${error.message}</p>
+          </div>
+        `;
+        // Set count to 0 on error
+        document.getElementById('active-sensors-count').textContent = '0';
+      }
+    }
+
+    // Create a sensor card element
+    function createSensorCard(sensorId, reading) {
+      const link = document.createElement('div');
+      link.onclick = () => openSensorModal(sensorId);
+      link.className = 'block cursor-pointer group focus:outline-none focus:ring-2 focus:ring-limegreen rounded-xl';
+      
+      const sensorValue = formatSensorValue(reading);
+      
+      link.innerHTML = `
+        <div class="bg-lightgrey p-6 rounded-xl sensor-card transition-colors group-hover:bg-[#4a4c5a]">
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-xl font-bold">${sensorId}</p>
+            </div>
+          </div>
+          <div class="flex justify-between items-end mt-6">
+            <div></div>
+            <div class="text-right">
+              <p class="text-limegreen text-2xl font-bold">${sensorValue}</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      return link;
+    }
+
+    // Open sensor modal with graph
+    function openSensorModal(sensorId) {
+      currentSensorId = sensorId;
+      document.getElementById('modalSensorTitle').textContent = `${sensorId} - Temperature Graph`;
+      document.getElementById('sensorModal').style.display = 'block';
+      fetchAndPlotSensorData();
+    }
+
+    // Close sensor modal
+    function closeSensorModal() {
+      document.getElementById('sensorModal').style.display = 'none';
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+      if (chart) {
+        chart.destroy();
+        chart = null;
+      }
+    }
+
+    // Refresh graph data
+    function refreshSensorGraph() {
+      if (currentSensorId) {
+        fetchAndPlotSensorData();
+      }
+    }
+
+    // Toggle auto-refresh
+    function toggleAutoRefresh() {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+        showModalStatus('Auto-refresh stopped', 'info');
+      } else {
+        fetchAndPlotSensorData();
+        autoRefreshInterval = setInterval(fetchAndPlotSensorData, 30000);
+        showModalStatus('Auto-refresh enabled (every 30s)', 'success');
+      }
+    }
+
+    // Show status in modal
+    function showModalStatus(message, type) {
+      const statusDiv = document.getElementById('modalStatus');
+      statusDiv.textContent = message;
+      statusDiv.className = `mb-4 text-center p-3 rounded ${
+        type === 'loading' ? 'bg-yellowbtn text-black' :
+        type === 'success' ? 'bg-limegreen text-greenbtntext' :
+        type === 'error' ? 'bg-pinkaccent text-white' :
+        'bg-lightgrey text-white'
+      }`;
+    }
+
+    // Fetch sensor data for graphing
+    async function fetchSensorData(sensorId, limit = 20) {
+      const url = `${SENSOR_READINGS_URL}/${sensorId}/readings?limit=${limit}`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return await response.json();
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        throw error;
+      }
+    }
+
+    // Parse data for graphing
+    function parseData(data) {
+      const timestamps = [];
+      const values = [];
+
+      data.forEach((reading) => {
+        if (reading.timestamp) {
+          const date = new Date(reading.timestamp);
+          timestamps.push(date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}));
+        }
+
+        let value = null;
+        if (reading.temp_value !== undefined) {
+          value = reading.temp_value;
+        } else if (reading.value !== undefined) {
+          value = reading.value;
+        } else if (reading.reading !== undefined) {
+          value = reading.reading;
+        } else if (reading.measurement !== undefined) {
+          value = reading.measurement;
+        } else if (reading.temperature !== undefined) {
+          value = reading.temperature;
+        }
+
+        if (value !== null) {
+          values.push(parseFloat(value));
+        }
+      });
+
+      return { timestamps, values };
+    }
+
+    // Calculate statistics
+    function calculateStats(values) {
+      if (!values.length) return null;
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const avg = values.reduce((a, b) => a + b, 0) / values.length;
+      const latest = values[0];
+      return { min, max, avg, latest, count: values.length };
+    }
+
+    // Display statistics
+    function displayStats(stats) {
+      if (!stats) return;
+      const statsDiv = document.getElementById('stats');
+      statsDiv.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">Latest</div>
+          <div class="stat-value">${stats.latest.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Average</div>
+          <div class="stat-value">${stats.avg.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Min</div>
+          <div class="stat-value">${stats.min.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Max</div>
+          <div class="stat-value">${stats.max.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Points</div>
+          <div class="stat-value">${stats.count}</div>
+        </div>
+      `;
+    }
+
+    // Plot data on chart
+    function plotData(timestamps, values, sensorId) {
+      const ctx = document.getElementById('sensorChart').getContext('2d');
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: `${sensorId} Temperature`,
+            data: values,
+            borderColor: '#98F190',
+            backgroundColor: 'rgba(152, 241, 144, 0.08)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            pointBackgroundColor: '#98F190',
+            pointBorderColor: '#00361C'
+          }]
         },
-        "timestamp": datetime.now().isoformat()
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top',
+              labels: { color: '#a0aec0' }
+            },
+            title: {
+              display: true,
+              text: `${sensorId} - Real-Time Temperature Readings`,
+              font: { size: 15, weight: 'bold' },
+              color: '#98F190'
+            },
+            tooltip: {
+              backgroundColor: '#1E1F25',
+              titleColor: '#98F190',
+              bodyColor: '#a0aec0',
+              borderColor: '#98F190',
+              borderWidth: 1
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: 'Temperature (°F)', color: '#a0aec0' },
+              ticks: { color: '#a0aec0' },
+              grid: { color: 'rgba(152, 241, 144, 0.08)' }
+            },
+            x: {
+              title: { display: true, text: 'Time', color: '#a0aec0' },
+              ticks: { color: '#a0aec0' },
+              grid: { color: 'rgba(152, 241, 144, 0.08)' }
+            }
+          }
+        }
+      });
     }
 
-@app.get("/hc")
-async def hc():
-    """Healthcheck endpoint for Coolify"""
-    print("check hc end point hit")
-    return "healthy"
+    // Fetch and plot sensor data
+    async function fetchAndPlotSensorData() {
+      if (!currentSensorId) {
+        showModalStatus('No sensor selected', 'error');
+        return;
+      }
 
-# POST endpoint to receive sensor data (REST API fallback)
-@app.post("/data", status_code=201)
-async def submit_sensor_data(data: SensorData):
-    """Submit new sensor data and store in MySQL database"""
-    try:
-        # Insert data into database
-        record_id = insert_sensor_data(data)
-        
-        # Print received data to console
-        print(f"\n🌐 REST API DATA RECEIVED - Record ID: {record_id}")
-        print(f"   Sensor: {data.sensor_id} | Device: {data.device_id}")
-        print(f"   Temp: {data.temp_value}°C | Humidity: {data.humidity}%")
-        
-        return {
-            "status": "success",
-            "message": "Sensor data received and stored successfully",
-            "record_id": record_id,
-            "data": {
-                "sensor_id": data.sensor_id,
-                "device_id": data.device_id,
-                "timestamp": data.timestamp.isoformat(),
-                "temp_value": data.temp_value,
-                "humidity": data.humidity
-            }
+      const limit = parseInt(document.getElementById('limitInput').value) || 20;
+      showModalStatus(`Fetching data from ${currentSensorId}...`, 'loading');
+
+      try {
+        const data = await fetchSensorData(currentSensorId, limit);
+        const { timestamps, values } = parseData(data);
+
+        if (!values.length) {
+          showModalStatus(`⚠️ No numeric values found in ${currentSensorId} response.`, 'error');
+          console.log('Full API response:', data);
+          return;
         }
-    
-    except Exception as e:
-        print(f"❌ Error in /data endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-# POST endpoint to receive bulk sensor data from JSON file
-@app.post("/data/bulk", status_code=201)
-async def submit_bulk_sensor_data(data_list: List[SensorData]):
-    """Submit multiple sensor data records in bulk"""
-    
-    if not data_list:
-        raise HTTPException(status_code=400, detail="Empty data list provided")
-    
-    try:
-        inserted_records = []
-        failed_records = []
-        
-        print(f"\n📦 BULK DATA RECEIVED: {len(data_list)} records")
-        
-        for idx, data in enumerate(data_list, 1):
-            try:
-                # Insert data into database
-                record_id = insert_sensor_data(data)
-                
-                inserted_records.append({
-                    "record_id": record_id,
-                    "sensor_id": data.sensor_id,
-                    "device_id": data.device_id,
-                    "timestamp": data.timestamp.isoformat()
-                })
-                
-                print(f"   ✅ Record {idx}: ID {record_id} - {data.sensor_id}")
-                
-            except Exception as e:
-                failed_records.append({
-                    "index": idx,
-                    "sensor_id": data.sensor_id,
-                    "error": str(e)
-                })
-                print(f"   ❌ Record {idx}: FAILED - {str(e)}")
-        
-        print(f"📦 BULK COMPLETE: {len(inserted_records)} success, {len(failed_records)} failed")
-        
-        return {
-            "status": "completed",
-            "message": f"Bulk insert completed: {len(inserted_records)} successful, {len(failed_records)} failed",
-            "summary": {
-                "total_received": len(data_list),
-                "successful": len(inserted_records),
-                "failed": len(failed_records)
-            },
-            "inserted_records": inserted_records,
-            "failed_records": failed_records if failed_records else None
-        }
-    
-    except Exception as e:
-        print(f"❌ Error in /data/bulk endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        plotData(timestamps, values, currentSensorId);
+        displayStats(calculateStats(values));
+        showModalStatus(`✓ Loaded ${values.length} readings from ${currentSensorId}`, 'success');
+      } catch (error) {
+        showModalStatus(`✗ Error fetching ${currentSensorId}: ${error.message}`, 'error');
+        console.error('Full error:', error);
+      }
+    }
 
-# GET endpoint to retrieve latest readings for a specific sensor
-@app.get("/sensors/{sensor_id}/readings", response_model=List[SensorReading])
-async def get_sensor_readings(
-    sensor_id: str,
-    limit: int = Query(default=10, ge=1, le=100, description="Number of readings to retrieve")
-):
-    """Get the latest N readings for a specific sensor"""
-    try:
-        readings = get_latest_readings(sensor_id, limit)
-        
-        if not readings:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No readings found for sensor: {sensor_id}"
-            )
-        
-        return readings
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Error getting readings for {sensor_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    // Initialize GSAP animations
+    function initializeAnimations() {
+      // Sidebar notifications: staggered slide/fade-in
+      const items = document.querySelectorAll('.notification-item');
+      if (items.length) {
+        gsap.to(items, {
+          opacity: 1,
+          y: 0,
+          duration: 0.6,
+          ease: 'power3.out',
+          stagger: 0.15
+        });
 
-# GET endpoint to retrieve list of all sensors
-@app.get("/sensors", response_model=List[str])
-async def list_sensors():
-    """Get a list of all unique sensor IDs that have recorded data"""
-    try:
-        sensors = get_all_sensors()
-        return sensors
-    
-    except Exception as e:
-        print(f"❌ Error listing sensors: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        // Gentle attention pulse after entrance
+        items.forEach((el, i) => {
+          gsap.to(el, {
+            scale: 1.02,
+            duration: 0.8,
+            yoyo: true,
+            repeat: 2,
+            delay: 0.6 + i * 0.1,
+            ease: 'sine.inOut',
+            transformOrigin: 'center'
+          });
+        });
+      }
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services when FastAPI starts"""
-    print("\n" + "="*60)
-    print("🚀 SENSOR DATA API SERVER STARTING")
-    print("="*60)
-    print(f"Database: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
-    print(f"MQTT Broker: {MQTT_BROKER}:{MQTT_PORT}")
-    print("="*60)
-    
-    # Start MQTT client
-    start_mqtt_client()
+      // Optional: sensor card hover lift using GSAP (progressive enhancement)
+      const cards = document.querySelectorAll('.sensor-card');
+      cards.forEach(card => {
+        card.addEventListener('mouseenter', () => {
+          gsap.to(card, { y: -4, duration: 0.2, ease: 'power2.out' });
+        });
+        card.addEventListener('mouseleave', () => {
+          gsap.to(card, { y: 0, duration: 0.2, ease: 'power2.out' });
+        });
+      });
+    }
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup when FastAPI shuts down"""
-    global mqtt_client
-    if mqtt_client:
-        mqtt_client.loop_stop()
-        mqtt_client.disconnect()
-    print("🛑 Server shutdown complete")
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+      const modal = document.getElementById('sensorModal');
+      if (event.target == modal) {
+        closeSensorModal();
+      }
+    }
 
-# For local development
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=int(os.getenv('PORT', '8000')),
-        log_level="info"
-    )
+    // Load sensors when page loads
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchAndDisplaySensors();
+    });
+  </script>
+</body>
+</html>
