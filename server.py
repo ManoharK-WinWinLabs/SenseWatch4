@@ -279,10 +279,10 @@ async def health_check():
         },
         "timestamp": datetime.now().isoformat()
     }
-@app.get("/health1")
-async def health1_check():
+@app.get("/hc")
+async def hc():
     """Detailed health check endpoint"""
-
+    print("check hc end point hit")
     
     return 'healthy', 200
 
@@ -437,4 +437,5 @@ if __name__ == "__main__":
         port=int(os.getenv('PORT', '8000')),
         log_level="info"
     )
+
 
