@@ -284,7 +284,7 @@ async def hc():
     """Detailed health check endpoint"""
     print("check hc end point hit")
     
-    return 'healthy', 200
+    return "healthy"
 
 # POST endpoint to receive sensor data (REST API fallback)
 @app.post("/data", status_code=201)
@@ -437,5 +437,6 @@ if __name__ == "__main__":
         port=int(os.getenv('PORT', '8000')),
         log_level="info"
     )
+
 
 
