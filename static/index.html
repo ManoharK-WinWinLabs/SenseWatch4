@@ -51,9 +51,11 @@
       margin: 2% auto;
       padding: 30px;
       border-radius: 15px;
-      width: 90%;
-      max-width: 1200px;
+      width: 95%;
+      max-width: 1400px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      max-height: 90vh;
+      overflow-y: auto;
     }
     
     .close {
@@ -90,6 +92,26 @@
       font-weight: bold;
       color: #98F190;
       margin-top: 5px;
+    }
+    
+    .chart-container {
+      height: 350px;
+      margin-bottom: 20px;
+    }
+    
+    .chart-section {
+      background: #2D3748;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .chart-title {
+      color: #98F190;
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-align: center;
     }
   </style>
 </head>
@@ -163,7 +185,7 @@
       <span class="close" onclick="closeSensorModal()">&times;</span>
       <h2 class="text-2xl font-bold text-limegreen mb-4" id="modalSensorTitle">Sensor Details</h2>
       
-      <div class="flex gap-4 mb-6">
+      <div class="flex gap-4 mb-6 flex-wrap">
         <input type="number" id="limitInput" value="20" min="1" max="100" 
                placeholder="Number of readings"
                class="bg-lightgrey text-white px-4 py-2 rounded placeholder-gray-400 focus:outline-none">
@@ -175,11 +197,23 @@
       
       <div id="modalStatus" class="mb-4 text-center p-3 rounded"></div>
       
-      <div style="height: 400px; margin-bottom: 20px;">
-        <canvas id="sensorChart"></canvas>
+      <!-- Temperature Graph Section -->
+      <div class="chart-section">
+        <div class="chart-title">🌡️ Temperature Readings</div>
+        <div class="chart-container">
+          <canvas id="temperatureChart"></canvas>
+        </div>
+        <div class="flex justify-center flex-wrap gap-6 mt-4" id="tempStats"></div>
       </div>
       
-      <div class="flex justify-center flex-wrap gap-6" id="stats"></div>
+      <!-- Humidity Graph Section -->
+      <div class="chart-section">
+        <div class="chart-title">💧 Humidity Readings</div>
+        <div class="chart-container">
+          <canvas id="humidityChart"></canvas>
+        </div>
+        <div class="flex justify-center flex-wrap gap-6 mt-4" id="humidityStats"></div>
+      </div>
     </div>
   </div>
 
@@ -189,15 +223,16 @@
     const SENSOR_LIST_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
     const SENSOR_READINGS_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
 
-    // Global variables for graph
+    // Global variables for graphs
     let currentSensorId = null;
-    let chart = null;
+    let temperatureChart = null;
+    let humidityChart = null;
     let autoRefreshInterval = null;
 
     // Fetch latest reading for a sensor
     async function fetchLatestReading(sensorId) {
       try {
-        const response = await fetch(`${SENSOR_READINGS_URL}/${sensorId}/readings?limit=20`);
+        const response = await fetch(`${SENSOR_READINGS_URL}/${sensorId}/readings?limit=1`);
         
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -225,35 +260,9 @@
       
       // Check for temp_value field from your API
       if (reading.temp_value !== undefined) {
-        return `${reading.temp_value.toFixed(1)}°F`;
-      }
-      
-      // Fallback to other common field names
-      if (reading.temperature !== undefined) {
-        return `${reading.temperature.toFixed(1)}°F`;
-      } else if (reading.temp !== undefined) {
-        return `${reading.temp.toFixed(1)}°F`;
-      } else if (reading.humidity !== undefined) {
-        return `${reading.humidity.toFixed(1)}%`;
-      } else if (reading.value !== undefined) {
-        const val = reading.value;
-        if (typeof val === 'number') {
-          return val.toFixed(1);
-        }
-        return val;
-      } else if (reading.reading !== undefined) {
-        const val = reading.reading;
-        if (typeof val === 'number') {
-          return val.toFixed(1);
-        }
-        return val;
-      }
-      
-      // If no known field, return the first numeric value found
-      for (const key in reading) {
-        if (typeof reading[key] === 'number' && key !== 'id') {
-          return reading[key].toFixed(1);
-        }
+        const tempF = reading.temp_value.toFixed(1);
+        const humidity = reading.humidity !== undefined ? reading.humidity.toFixed(1) : '--';
+        return `${tempF}°F | ${humidity}%`;
       }
       
       return '--';
@@ -325,7 +334,7 @@
           <div class="flex justify-between items-end mt-6">
             <div></div>
             <div class="text-right">
-              <p class="text-limegreen text-2xl font-bold">${sensorValue}</p>
+              <p class="text-limegreen text-lg font-bold">${sensorValue}</p>
             </div>
           </div>
         </div>
@@ -334,10 +343,10 @@
       return link;
     }
 
-    // Open sensor modal with graph
+    // Open sensor modal with graphs
     function openSensorModal(sensorId) {
       currentSensorId = sensorId;
-      document.getElementById('modalSensorTitle').textContent = `${sensorId} - Temperature Graph`;
+      document.getElementById('modalSensorTitle').textContent = `${sensorId} - Temperature & Humidity`;
       document.getElementById('sensorModal').style.display = 'block';
       fetchAndPlotSensorData();
     }
@@ -349,9 +358,13 @@
         clearInterval(autoRefreshInterval);
         autoRefreshInterval = null;
       }
-      if (chart) {
-        chart.destroy();
-        chart = null;
+      if (temperatureChart) {
+        temperatureChart.destroy();
+        temperatureChart = null;
+      }
+      if (humidityChart) {
+        humidityChart.destroy();
+        humidityChart = null;
       }
     }
 
@@ -402,10 +415,11 @@
       }
     }
 
-    // Parse data for graphing
+    // Parse data for graphing (separate temperature and humidity)
     function parseData(data) {
       const timestamps = [];
-      const values = [];
+      const temperatureValues = [];
+      const humidityValues = [];
 
       data.forEach((reading) => {
         if (reading.timestamp) {
@@ -413,57 +427,72 @@
           timestamps.push(date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}));
         }
 
-        let value = null;
+        // Extract temperature
+        let tempValue = null;
         if (reading.temp_value !== undefined) {
-          value = reading.temp_value;
-        } else if (reading.value !== undefined) {
-          value = reading.value;
-        } else if (reading.reading !== undefined) {
-          value = reading.reading;
-        } else if (reading.measurement !== undefined) {
-          value = reading.measurement;
+          tempValue = reading.temp_value;
         } else if (reading.temperature !== undefined) {
-          value = reading.temperature;
+          tempValue = reading.temperature;
+        } else if (reading.temp !== undefined) {
+          tempValue = reading.temp;
+        }
+        
+        if (tempValue !== null) {
+          temperatureValues.push(parseFloat(tempValue));
+        } else {
+          temperatureValues.push(null);
         }
 
-        if (value !== null) {
-          values.push(parseFloat(value));
+        // Extract humidity
+        let humidityValue = null;
+        if (reading.humidity !== undefined) {
+          humidityValue = reading.humidity;
+        }
+        
+        if (humidityValue !== null) {
+          humidityValues.push(parseFloat(humidityValue));
+        } else {
+          humidityValues.push(null);
         }
       });
 
-      return { timestamps, values };
+      return { timestamps, temperatureValues, humidityValues };
     }
 
     // Calculate statistics
     function calculateStats(values) {
-      if (!values.length) return null;
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const avg = values.reduce((a, b) => a + b, 0) / values.length;
-      const latest = values[0];
-      return { min, max, avg, latest, count: values.length };
+      const validValues = values.filter(v => v !== null);
+      if (!validValues.length) return null;
+      const min = Math.min(...validValues);
+      const max = Math.max(...validValues);
+      const avg = validValues.reduce((a, b) => a + b, 0) / validValues.length;
+      const latest = validValues[0];
+      return { min, max, avg, latest, count: validValues.length };
     }
 
     // Display statistics
-    function displayStats(stats) {
-      if (!stats) return;
-      const statsDiv = document.getElementById('stats');
+    function displayStats(stats, elementId, unit) {
+      if (!stats) {
+        document.getElementById(elementId).innerHTML = '<p class="text-gray-400">No data available</p>';
+        return;
+      }
+      const statsDiv = document.getElementById(elementId);
       statsDiv.innerHTML = `
         <div class="stat-card">
           <div class="stat-label">Latest</div>
-          <div class="stat-value">${stats.latest.toFixed(2)}°F</div>
+          <div class="stat-value">${stats.latest.toFixed(2)}${unit}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Average</div>
-          <div class="stat-value">${stats.avg.toFixed(2)}°F</div>
+          <div class="stat-value">${stats.avg.toFixed(2)}${unit}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Min</div>
-          <div class="stat-value">${stats.min.toFixed(2)}°F</div>
+          <div class="stat-value">${stats.min.toFixed(2)}${unit}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Max</div>
-          <div class="stat-value">${stats.max.toFixed(2)}°F</div>
+          <div class="stat-value">${stats.max.toFixed(2)}${unit}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Points</div>
@@ -472,17 +501,73 @@
       `;
     }
 
-    // Plot data on chart
-    function plotData(timestamps, values, sensorId) {
-      const ctx = document.getElementById('sensorChart').getContext('2d');
-      if (chart) chart.destroy();
+    // Plot temperature data
+    function plotTemperatureData(timestamps, values, sensorId) {
+      const ctx = document.getElementById('temperatureChart').getContext('2d');
+      if (temperatureChart) temperatureChart.destroy();
 
-      chart = new Chart(ctx, {
+      temperatureChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: timestamps,
           datasets: [{
             label: `${sensorId} Temperature`,
+            data: values,
+            borderColor: '#FB7A7C',
+            backgroundColor: 'rgba(251, 122, 124, 0.08)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            pointBackgroundColor: '#FB7A7C',
+            pointBorderColor: '#610002'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top',
+              labels: { color: '#a0aec0' }
+            },
+            tooltip: {
+              backgroundColor: '#1E1F25',
+              titleColor: '#FB7A7C',
+              bodyColor: '#a0aec0',
+              borderColor: '#FB7A7C',
+              borderWidth: 1
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: 'Temperature (°F)', color: '#a0aec0' },
+              ticks: { color: '#a0aec0' },
+              grid: { color: 'rgba(251, 122, 124, 0.08)' }
+            },
+            x: {
+              title: { display: true, text: 'Time', color: '#a0aec0' },
+              ticks: { color: '#a0aec0' },
+              grid: { color: 'rgba(251, 122, 124, 0.08)' }
+            }
+          }
+        }
+      });
+    }
+
+    // Plot humidity data
+    function plotHumidityData(timestamps, values, sensorId) {
+      const ctx = document.getElementById('humidityChart').getContext('2d');
+      if (humidityChart) humidityChart.destroy();
+
+      humidityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: `${sensorId} Humidity`,
             data: values,
             borderColor: '#98F190',
             backgroundColor: 'rgba(152, 241, 144, 0.08)',
@@ -503,12 +588,6 @@
               position: 'top',
               labels: { color: '#a0aec0' }
             },
-            title: {
-              display: true,
-              text: `${sensorId} - Real-Time Temperature Readings`,
-              font: { size: 15, weight: 'bold' },
-              color: '#98F190'
-            },
             tooltip: {
               backgroundColor: '#1E1F25',
               titleColor: '#98F190',
@@ -519,8 +598,9 @@
           },
           scales: {
             y: {
-              beginAtZero: false,
-              title: { display: true, text: 'Temperature (°F)', color: '#a0aec0' },
+              beginAtZero: true,
+              max: 100,
+              title: { display: true, text: 'Humidity (%)', color: '#a0aec0' },
               ticks: { color: '#a0aec0' },
               grid: { color: 'rgba(152, 241, 144, 0.08)' }
             },
@@ -546,17 +626,26 @@
 
       try {
         const data = await fetchSensorData(currentSensorId, limit);
-        const { timestamps, values } = parseData(data);
+        const { timestamps, temperatureValues, humidityValues } = parseData(data);
 
-        if (!values.length) {
-          showModalStatus(`⚠️ No numeric values found in ${currentSensorId} response.`, 'error');
-          console.log('Full API response:', data);
-          return;
+        // Plot temperature
+        if (temperatureValues.some(v => v !== null)) {
+          plotTemperatureData(timestamps, temperatureValues, currentSensorId);
+          displayStats(calculateStats(temperatureValues), 'tempStats', '°F');
+        } else {
+          document.getElementById('tempStats').innerHTML = '<p class="text-gray-400">No temperature data available</p>';
         }
 
-        plotData(timestamps, values, currentSensorId);
-        displayStats(calculateStats(values));
-        showModalStatus(`✓ Loaded ${values.length} readings from ${currentSensorId}`, 'success');
+        // Plot humidity
+        if (humidityValues.some(v => v !== null)) {
+          plotHumidityData(timestamps, humidityValues, currentSensorId);
+          displayStats(calculateStats(humidityValues), 'humidityStats', '%');
+        } else {
+          document.getElementById('humidityStats').innerHTML = '<p class="text-gray-400">No humidity data available</p>';
+        }
+
+        const totalPoints = timestamps.length;
+        showModalStatus(`✓ Loaded ${totalPoints} readings from ${currentSensorId}`, 'success');
       } catch (error) {
         showModalStatus(`✗ Error fetching ${currentSensorId}: ${error.message}`, 'error');
         console.error('Full error:', error);
