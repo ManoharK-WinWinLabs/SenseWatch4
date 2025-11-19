@@ -280,6 +280,9 @@
           <input type="number" id="tempMax" class="threshold-input" step="0.1" placeholder="100">
           <span class="threshold-label">°F</span>
           
+          <span class="threshold-label">Alert Email:</span>
+          <input type="email" id="tempEmail" class="threshold-input" style="width: 200px;" placeholder="optional@example.com">
+          
           <button class="save-thresholds-btn" onclick="saveThresholds()">💾 Save Thresholds</button>
         </div>
         
@@ -351,7 +354,7 @@
     }
 
     // Save thresholds for current sensor
-    function saveThresholds() {
+    async function saveThresholds() {
       if (!currentSensorId) return;
       
       const thresholds = {
@@ -361,10 +364,44 @@
         humidityMax: parseFloat(document.getElementById('humidityMax').value) || DEFAULT_THRESHOLDS.humidityMax
       };
       
+      const alertEmail = document.getElementById('tempEmail').value.trim() || null;
+      
+      // Save to localStorage (for frontend use)
       const key = `thresholds_${currentSensorId}`;
       localStorage.setItem(key, JSON.stringify(thresholds));
       
-      showModalStatus(`✓ Thresholds saved for ${currentSensorId}`, 'success');
+      // Save to backend API (for email alerts)
+      try {
+        const response = await fetch(`${SENSOR_LIST_URL.replace('/sensors', '')}/thresholds`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            sensor_id: currentSensorId,
+            temp_min: thresholds.tempMin,
+            temp_max: thresholds.tempMax,
+            humidity_min: thresholds.humidityMin,
+            humidity_max: thresholds.humidityMax,
+            email: alertEmail
+          })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          let message = `✓ Thresholds saved for ${currentSensorId}`;
+          if (alertEmail) {
+            message += ` (Alerts → ${alertEmail})`;
+          }
+          showModalStatus(message, 'success');
+        } else {
+          showModalStatus(`✓ Thresholds saved locally, but backend save failed`, 'info');
+          console.error('Backend save failed:', await response.text());
+        }
+      } catch (error) {
+        showModalStatus(`✓ Thresholds saved locally (Backend unreachable)`, 'info');
+        console.error('Backend save error:', error);
+      }
       
       // Refresh the graphs to show new threshold lines
       setTimeout(() => {
@@ -373,12 +410,32 @@
     }
 
     // Load thresholds into input fields
-    function loadThresholds(sensorId) {
+    async function loadThresholds(sensorId) {
+      // Load from localStorage for immediate display
       const thresholds = getThresholds(sensorId);
       document.getElementById('tempMin').value = thresholds.tempMin;
       document.getElementById('tempMax').value = thresholds.tempMax;
       document.getElementById('humidityMin').value = thresholds.humidityMin;
       document.getElementById('humidityMax').value = thresholds.humidityMax;
+      
+      // Try to load from backend API (for email field)
+      try {
+        const response = await fetch(`${SENSOR_LIST_URL.replace('/sensors', '')}/thresholds/${sensorId}`);
+        if (response.ok) {
+          const backendThresholds = await response.json();
+          if (backendThresholds.configured) {
+            // Update with backend values if they exist
+            document.getElementById('tempMin').value = backendThresholds.temp_min;
+            document.getElementById('tempMax').value = backendThresholds.temp_max;
+            document.getElementById('humidityMin').value = backendThresholds.humidity_min;
+            document.getElementById('humidityMax').value = backendThresholds.humidity_max;
+            document.getElementById('tempEmail').value = backendThresholds.email || '';
+          }
+        }
+      } catch (error) {
+        console.log('Could not load backend thresholds:', error);
+        // Continue with localStorage values
+      }
     }
 
     // Check if sensor reading has warnings (using custom thresholds)
