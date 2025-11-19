@@ -147,7 +147,7 @@
             <p class="font-semibold">Active Sensors</p>
           </div>
           <div class="bg-pinkaccent text-lightred px-6 py-4 rounded-xl text-center">
-            <p class="text-4xl font-extrabold">3</p>
+            <p class="text-4xl font-extrabold" id="sensor-warnings-count">0</p>
             <p class="font-semibold">Sensor Warnings</p>
           </div>
         </div>
@@ -228,6 +228,35 @@
     let humidityChart = null;
     let autoRefreshInterval = null;
 
+    // Check if sensor reading has warnings (outside normal range)
+    function checkSensorWarnings(reading) {
+      if (!reading) return false;
+      
+      const warnings = [];
+      
+      // Temperature thresholds (adjust these based on your requirements)
+      const TEMP_MIN = 32;  // 32°F (freezing)
+      const TEMP_MAX = 100; // 100°F
+      
+      // Humidity thresholds
+      const HUMIDITY_MIN = 20; // 20%
+      const HUMIDITY_MAX = 80; // 80%
+      
+      if (reading.temp_value !== undefined) {
+        if (reading.temp_value < TEMP_MIN || reading.temp_value > TEMP_MAX) {
+          warnings.push('temperature');
+        }
+      }
+      
+      if (reading.humidity !== undefined) {
+        if (reading.humidity < HUMIDITY_MIN || reading.humidity > HUMIDITY_MAX) {
+          warnings.push('humidity');
+        }
+      }
+      
+      return warnings.length > 0;
+    }
+
     // Fetch latest reading for a sensor
     async function fetchLatestReading(sensorId) {
       try {
@@ -286,13 +315,23 @@
         sensorGrid.innerHTML = ''; // Clear loading message
         
         // Create cards and fetch readings for each sensor
+        let warningCount = 0;
         const cardPromises = sensorIds.map(async (sensorId, index) => {
           const latestReading = await fetchLatestReading(sensorId);
+          
+          // Check if this sensor has warnings
+          if (checkSensorWarnings(latestReading)) {
+            warningCount++;
+          }
+          
           return createSensorCard(sensorId, latestReading);
         });
         
         // Wait for all cards to be created
         const cards = await Promise.all(cardPromises);
+        
+        // Update warning count
+        document.getElementById('sensor-warnings-count').textContent = warningCount;
         
         // Append all cards to the grid
         cards.forEach(card => {
@@ -312,6 +351,7 @@
         `;
         // Set count to 0 on error
         document.getElementById('active-sensors-count').textContent = '0';
+        document.getElementById('sensor-warnings-count').textContent = '0';
       }
     }
 
@@ -322,13 +362,19 @@
       link.className = 'block cursor-pointer group focus:outline-none focus:ring-2 focus:ring-limegreen rounded-xl';
       
       const sensorValue = formatSensorValue(reading);
+      const hasWarning = checkSensorWarnings(reading);
+      
+      // Determine card styling based on warning status
+      const cardBgClass = hasWarning ? 'bg-[#3D1F1F] border-2 border-pinkaccent' : 'bg-lightgrey';
+      const warningIcon = hasWarning ? '<span class="text-pinkaccent text-2xl">⚠️</span>' : '';
       
       link.innerHTML = `
-        <div class="bg-lightgrey p-6 rounded-xl sensor-card transition-colors group-hover:bg-[#4a4c5a]">
+        <div class="${cardBgClass} p-6 rounded-xl sensor-card transition-colors group-hover:bg-[#4a4c5a]">
           <div class="flex justify-between items-center">
             <div>
               <p class="text-xl font-bold">${sensorId}</p>
             </div>
+            <div>${warningIcon}</div>
           </div>
           <div class="flex justify-between items-end mt-6">
             <div></div>
@@ -689,6 +735,11 @@
     // Load sensors when page loads
     window.addEventListener('DOMContentLoaded', () => {
       fetchAndDisplaySensors();
+      
+      // Refresh sensor list and warnings every 30 seconds
+      setInterval(() => {
+        fetchAndDisplaySensors();
+      }, 30000);
     });
   </script>
 </body>
