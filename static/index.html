@@ -7,6 +7,9 @@
 
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Chart.js for graphing -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script>
     tailwind.config = {
@@ -29,6 +32,66 @@
 
   <!-- GSAP -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+  
+  <style>
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.8);
+    }
+    
+    .modal-content {
+      background-color: #1E1F25;
+      margin: 2% auto;
+      padding: 30px;
+      border-radius: 15px;
+      width: 90%;
+      max-width: 1200px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    
+    .close {
+      color: #98F190;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: color 0.3s;
+    }
+    
+    .close:hover,
+    .close:focus {
+      color: #FB7A7C;
+    }
+    
+    .stat-card {
+      background: #40424f;
+      padding: 12px 24px;
+      border-radius: 9px;
+      text-align: center;
+      min-width: 110px;
+      border-left: 3px solid #98F190;
+    }
+    
+    .stat-label {
+      font-size: 13px;
+      color: #a0aec0;
+      text-transform: uppercase;
+    }
+    
+    .stat-value {
+      font-size: 1.55rem;
+      font-weight: bold;
+      color: #98F190;
+      margin-top: 5px;
+    }
+  </style>
 </head>
 <body class="bg-deepblack text-white font-sans">
   <div class="flex h-screen">
@@ -94,11 +157,42 @@
     </main>
   </div>
 
+  <!-- Sensor Detail Modal -->
+  <div id="sensorModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeSensorModal()">&times;</span>
+      <h2 class="text-2xl font-bold text-limegreen mb-4" id="modalSensorTitle">Sensor Details</h2>
+      
+      <div class="flex gap-4 mb-6">
+        <input type="number" id="limitInput" value="20" min="1" max="100" 
+               placeholder="Number of readings"
+               class="bg-lightgrey text-white px-4 py-2 rounded placeholder-gray-400 focus:outline-none">
+        <button class="bg-limegreen text-greenbtntext px-6 py-2 rounded-lg font-semibold hover:opacity-90" 
+                onclick="refreshSensorGraph()">🔄 Refresh</button>
+        <button class="bg-yellowbtn text-black px-6 py-2 rounded-lg font-semibold hover:opacity-90" 
+                onclick="toggleAutoRefresh()">⏱️ Auto Refresh (30s)</button>
+      </div>
+      
+      <div id="modalStatus" class="mb-4 text-center p-3 rounded"></div>
+      
+      <div style="height: 400px; margin-bottom: 20px;">
+        <canvas id="sensorChart"></canvas>
+      </div>
+      
+      <div class="flex justify-center flex-wrap gap-6" id="stats"></div>
+    </div>
+  </div>
+
   <!-- JavaScript -->
   <script>
     // API endpoints - Using full domain URLs
     const SENSOR_LIST_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
     const SENSOR_READINGS_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
+
+    // Global variables for graph
+    let currentSensorId = null;
+    let chart = null;
+    let autoRefreshInterval = null;
 
     // Fetch latest reading for a sensor
     async function fetchLatestReading(sensorId) {
@@ -215,9 +309,9 @@
 
     // Create a sensor card element
     function createSensorCard(sensorId, reading) {
-      const link = document.createElement('a');
-      link.href = `sensor.html?sensor=${sensorId}`;
-      link.className = 'block group focus:outline-none focus:ring-2 focus:ring-limegreen rounded-xl';
+      const link = document.createElement('div');
+      link.onclick = () => openSensorModal(sensorId);
+      link.className = 'block cursor-pointer group focus:outline-none focus:ring-2 focus:ring-limegreen rounded-xl';
       
       const sensorValue = formatSensorValue(reading);
       
@@ -238,6 +332,235 @@
       `;
       
       return link;
+    }
+
+    // Open sensor modal with graph
+    function openSensorModal(sensorId) {
+      currentSensorId = sensorId;
+      document.getElementById('modalSensorTitle').textContent = `${sensorId} - Temperature Graph`;
+      document.getElementById('sensorModal').style.display = 'block';
+      fetchAndPlotSensorData();
+    }
+
+    // Close sensor modal
+    function closeSensorModal() {
+      document.getElementById('sensorModal').style.display = 'none';
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+      if (chart) {
+        chart.destroy();
+        chart = null;
+      }
+    }
+
+    // Refresh graph data
+    function refreshSensorGraph() {
+      if (currentSensorId) {
+        fetchAndPlotSensorData();
+      }
+    }
+
+    // Toggle auto-refresh
+    function toggleAutoRefresh() {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+        showModalStatus('Auto-refresh stopped', 'info');
+      } else {
+        fetchAndPlotSensorData();
+        autoRefreshInterval = setInterval(fetchAndPlotSensorData, 30000);
+        showModalStatus('Auto-refresh enabled (every 30s)', 'success');
+      }
+    }
+
+    // Show status in modal
+    function showModalStatus(message, type) {
+      const statusDiv = document.getElementById('modalStatus');
+      statusDiv.textContent = message;
+      statusDiv.className = `mb-4 text-center p-3 rounded ${
+        type === 'loading' ? 'bg-yellowbtn text-black' :
+        type === 'success' ? 'bg-limegreen text-greenbtntext' :
+        type === 'error' ? 'bg-pinkaccent text-white' :
+        'bg-lightgrey text-white'
+      }`;
+    }
+
+    // Fetch sensor data for graphing
+    async function fetchSensorData(sensorId, limit = 20) {
+      const url = `${SENSOR_READINGS_URL}/${sensorId}/readings?limit=${limit}`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return await response.json();
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        throw error;
+      }
+    }
+
+    // Parse data for graphing
+    function parseData(data) {
+      const timestamps = [];
+      const values = [];
+
+      data.forEach((reading) => {
+        if (reading.timestamp) {
+          const date = new Date(reading.timestamp);
+          timestamps.push(date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}));
+        }
+
+        let value = null;
+        if (reading.temp_value !== undefined) {
+          value = reading.temp_value;
+        } else if (reading.value !== undefined) {
+          value = reading.value;
+        } else if (reading.reading !== undefined) {
+          value = reading.reading;
+        } else if (reading.measurement !== undefined) {
+          value = reading.measurement;
+        } else if (reading.temperature !== undefined) {
+          value = reading.temperature;
+        }
+
+        if (value !== null) {
+          values.push(parseFloat(value));
+        }
+      });
+
+      return { timestamps, values };
+    }
+
+    // Calculate statistics
+    function calculateStats(values) {
+      if (!values.length) return null;
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const avg = values.reduce((a, b) => a + b, 0) / values.length;
+      const latest = values[0];
+      return { min, max, avg, latest, count: values.length };
+    }
+
+    // Display statistics
+    function displayStats(stats) {
+      if (!stats) return;
+      const statsDiv = document.getElementById('stats');
+      statsDiv.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">Latest</div>
+          <div class="stat-value">${stats.latest.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Average</div>
+          <div class="stat-value">${stats.avg.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Min</div>
+          <div class="stat-value">${stats.min.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Max</div>
+          <div class="stat-value">${stats.max.toFixed(2)}°F</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Points</div>
+          <div class="stat-value">${stats.count}</div>
+        </div>
+      `;
+    }
+
+    // Plot data on chart
+    function plotData(timestamps, values, sensorId) {
+      const ctx = document.getElementById('sensorChart').getContext('2d');
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: timestamps,
+          datasets: [{
+            label: `${sensorId} Temperature`,
+            data: values,
+            borderColor: '#98F190',
+            backgroundColor: 'rgba(152, 241, 144, 0.08)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            pointBackgroundColor: '#98F190',
+            pointBorderColor: '#00361C'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top',
+              labels: { color: '#a0aec0' }
+            },
+            title: {
+              display: true,
+              text: `${sensorId} - Real-Time Temperature Readings`,
+              font: { size: 15, weight: 'bold' },
+              color: '#98F190'
+            },
+            tooltip: {
+              backgroundColor: '#1E1F25',
+              titleColor: '#98F190',
+              bodyColor: '#a0aec0',
+              borderColor: '#98F190',
+              borderWidth: 1
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: 'Temperature (°F)', color: '#a0aec0' },
+              ticks: { color: '#a0aec0' },
+              grid: { color: 'rgba(152, 241, 144, 0.08)' }
+            },
+            x: {
+              title: { display: true, text: 'Time', color: '#a0aec0' },
+              ticks: { color: '#a0aec0' },
+              grid: { color: 'rgba(152, 241, 144, 0.08)' }
+            }
+          }
+        }
+      });
+    }
+
+    // Fetch and plot sensor data
+    async function fetchAndPlotSensorData() {
+      if (!currentSensorId) {
+        showModalStatus('No sensor selected', 'error');
+        return;
+      }
+
+      const limit = parseInt(document.getElementById('limitInput').value) || 20;
+      showModalStatus(`Fetching data from ${currentSensorId}...`, 'loading');
+
+      try {
+        const data = await fetchSensorData(currentSensorId, limit);
+        const { timestamps, values } = parseData(data);
+
+        if (!values.length) {
+          showModalStatus(`⚠️ No numeric values found in ${currentSensorId} response.`, 'error');
+          console.log('Full API response:', data);
+          return;
+        }
+
+        plotData(timestamps, values, currentSensorId);
+        displayStats(calculateStats(values));
+        showModalStatus(`✓ Loaded ${values.length} readings from ${currentSensorId}`, 'success');
+      } catch (error) {
+        showModalStatus(`✗ Error fetching ${currentSensorId}: ${error.message}`, 'error');
+        console.error('Full error:', error);
+      }
     }
 
     // Initialize GSAP animations
@@ -277,6 +600,14 @@
           gsap.to(card, { y: 0, duration: 0.2, ease: 'power2.out' });
         });
       });
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+      const modal = document.getElementById('sensorModal');
+      if (event.target == modal) {
+        closeSensorModal();
+      }
     }
 
     // Load sensors when page loads
