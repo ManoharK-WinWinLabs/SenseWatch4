@@ -185,14 +185,13 @@
       <span class="close" onclick="closeSensorModal()">&times;</span>
       <h2 class="text-2xl font-bold text-limegreen mb-4" id="modalSensorTitle">Sensor Details</h2>
       
-      <div class="flex gap-4 mb-6 flex-wrap">
+      <div class="flex gap-4 mb-6 flex-wrap items-center">
         <input type="number" id="limitInput" value="20" min="1" max="100" 
                placeholder="Number of readings"
                class="bg-lightgrey text-white px-4 py-2 rounded placeholder-gray-400 focus:outline-none">
-        <button class="bg-limegreen text-greenbtntext px-6 py-2 rounded-lg font-semibold hover:opacity-90" 
-                onclick="refreshSensorGraph()">🔄 Refresh</button>
-        <button class="bg-yellowbtn text-black px-6 py-2 rounded-lg font-semibold hover:opacity-90" 
-                onclick="toggleAutoRefresh()">⏱️ Auto Refresh (30s)</button>
+        <div class="bg-limegreen text-greenbtntext px-4 py-2 rounded-lg font-semibold">
+          🔄 Auto-refresh: 10s
+        </div>
       </div>
       
       <div id="modalStatus" class="mb-4 text-center p-3 rounded"></div>
@@ -348,7 +347,15 @@
       currentSensorId = sensorId;
       document.getElementById('modalSensorTitle').textContent = `${sensorId} - Temperature & Humidity`;
       document.getElementById('sensorModal').style.display = 'block';
+      
+      // Initial data load
       fetchAndPlotSensorData();
+      
+      // Start auto-refresh every 10 seconds
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+      }
+      autoRefreshInterval = setInterval(fetchAndPlotSensorData, 10000);
     }
 
     // Close sensor modal
@@ -365,26 +372,6 @@
       if (humidityChart) {
         humidityChart.destroy();
         humidityChart = null;
-      }
-    }
-
-    // Refresh graph data
-    function refreshSensorGraph() {
-      if (currentSensorId) {
-        fetchAndPlotSensorData();
-      }
-    }
-
-    // Toggle auto-refresh
-    function toggleAutoRefresh() {
-      if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
-        autoRefreshInterval = null;
-        showModalStatus('Auto-refresh stopped', 'info');
-      } else {
-        fetchAndPlotSensorData();
-        autoRefreshInterval = setInterval(fetchAndPlotSensorData, 30000);
-        showModalStatus('Auto-refresh enabled (every 30s)', 'success');
       }
     }
 
