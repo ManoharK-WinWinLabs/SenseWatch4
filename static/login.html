@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SensorWatch | Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            background: linear-gradient(135deg, #667EEA 0%, #764BA2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            background-color: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 450px;
+            padding: 40px;
+            transition: transform 0.3s ease;
+        }
+        .container:hover {
+            transform: translateY(-5px);
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 35px;
+        }
+        .logo h1 {
+            color: #4A5568;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .logo p {
+            color: #718096;
+            font-size: 16px;
+        }
+        .form-toggle {
+            display: flex;
+            margin-bottom: 30px;
+            background: #F7FAFC;
+            border-radius: 10px;
+            padding: 5px;
+        }
+        .toggle-btn {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            background: none;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            color: #718096;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-radius: 8px;
+        }
+        .toggle-btn.active {
+            color: #4A5568;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .form {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .form.active {
+            display: block;
+        }
+        .input-group {
+            margin-bottom: 25px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #4A5568;
+            font-weight: 600;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #E2E8F0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        .input-group input:focus {
+            border-color: #667EEA;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667EEA 0%, #764BA2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 7px 20px rgba(102, 126, 234, 0.4);
+        }
+        .btn:active {
+            transform: translateY(0);
+        }
+        .forgot-password {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .forgot-password a {
+            color: #667EEA;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+        .forgot-password a:hover {
+            text-decoration: underline;
+            color: #5A67D8;
+        }
+        .message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+        .success {
+            background-color: #F0FFF4;
+            color: #2D7844;
+            border: 1px solid #9AE6B4;
+        }
+        .error {
+            background-color: #FED7D7;
+            color: #C53030;
+            border: 1px solid #FC8181;
+        }
+        .info {
+            background-color: #BEE3F8;
+            color: #2C5AA0;
+            border: 1px solid #90CDF4;
+        }
+        .password-requirements {
+            font-size: 12px;
+            color: #718096;
+            margin-top: 5px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #A0AEC0;
+            font-size: 12px;
+            border-top: 1px solid #E2E8F0;
+            padding-top: 20px;
+        }
+        .demo-credentials {
+            background: #FFF9E6;
+            border: 1px solid #FFD700;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-size: 13px;
+        }
+        .demo-credentials strong {
+            color: #B7791F;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .demo-credentials p {
+            margin: 5px 0;
+            color: #744210;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>🔒 SensorWatch Login</h1>
+            <p>Secure access to your dashboard</p>
+        </div>
+        
+        <!-- Demo Credentials Info -->
+        <div class="demo-credentials">
+            <strong>📋 Demo Credentials:</strong>
+            <p><strong>Username:</strong> admin</p>
+            <p><strong>Password:</strong> admin123</p>
+        </div>
+        
+        <div class="form-container">
+            <div class="form-toggle">
+                <button class="toggle-btn active" id="login-toggle">Sign In</button>
+                <button class="toggle-btn" id="register-toggle">Register</button>
+            </div>
+            
+            <!-- Login Form -->
+            <form class="form active" id="login-form">
+                <div class="input-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" placeholder="Enter your username" required>
+                </div>
+                <div class="input-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" placeholder="Enter your password" required>
+                </div>
+                <button type="submit" class="btn">Sign In</button>
+                <div class="forgot-password">
+                    <a href="#" id="forgot-password-link">Forgot your password?</a>
+                </div>
+            </form>
+            
+            <!-- Register Form -->
+            <form class="form" id="register-form">
+                <div class="input-group">
+                    <label for="register-name">Full Name</label>
+                    <input type="text" id="register-name" placeholder="Enter your full name" required>
+                </div>
+                <div class="input-group">
+                    <label for="register-username">Username</label>
+                    <input type="text" id="register-username" placeholder="Choose a username" required>
+                </div>
+                <div class="input-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" placeholder="Create a password" required>
+                    <div class="password-requirements">Must be at least 6 characters</div>
+                </div>
+                <div class="input-group">
+                    <label for="register-confirm-password">Confirm Password</label>
+                    <input type="password" id="register-confirm-password" placeholder="Confirm your password" required>
+                </div>
+                <button type="submit" class="btn">Create Account</button>
+            </form>
+            
+            <!-- Forgot Password Form -->
+            <form class="form" id="forgot-password-form">
+                <div class="input-group">
+                    <label for="forgot-username">Username</label>
+                    <input type="text" id="forgot-username" placeholder="Enter your username" required>
+                </div>
+                <button type="submit" class="btn">Reset Password</button>
+                <div class="forgot-password">
+                    <a href="#" id="back-to-login">Back to Sign In</a>
+                </div>
+            </form>
+            
+            <div class="message" id="message"></div>
+        </div>
+        
+        <div class="footer">
+            <p>&copy; 2025 SensorWatch | Secure Dashboard Access</p>
+        </div>
+    </div>
+    
+    <script>
+        // Sample users database (in production, this should be server-side)
+        const users = [
+            { username: 'admin', password: 'admin123', name: 'Administrator' },
+            { username: 'demo', password: 'demo123', name: 'Demo User' }
+        ];
+        
+        // DOM Elements
+        const loginToggle = document.getElementById('login-toggle');
+        const registerToggle = document.getElementById('register-toggle');
+        const loginForm = document.getElementById('login-form');
+        const registerForm = document.getElementById('register-form');
+        const forgotPasswordForm = document.getElementById('forgot-password-form');
+        const forgotPasswordLink = document.getElementById('forgot-password-link');
+        const backToLogin = document.getElementById('back-to-login');
+        const message = document.getElementById('message');
+        
+        // Check if user is already logged in
+        if (sessionStorage.getItem('isLoggedIn') === 'true') {
+            window.location.href = '/dashboard';
+        }
+        
+        // Toggle between forms
+        loginToggle.addEventListener('click', () => {
+            setActiveForm('login');
+        });
+        
+        registerToggle.addEventListener('click', () => {
+            setActiveForm('register');
+        });
+        
+        forgotPasswordLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            setActiveForm('forgot');
+        });
+        
+        backToLogin.addEventListener('click', (e) => {
+            e.preventDefault();
+            setActiveForm('login');
+        });
+        
+        // Form submission handlers
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            
+            if (!username || !password) {
+                showMessage('Please fill in all fields.', 'error');
+                return;
+            }
+            
+            // Check credentials
+            const user = users.find(u => u.username === username && u.password === password);
+            
+            if (user) {
+                showMessage('Login successful! Redirecting to dashboard...', 'success');
+                
+                // Store login state
+                sessionStorage.setItem('isLoggedIn', 'true');
+                sessionStorage.setItem('username', username);
+                sessionStorage.setItem('name', user.name);
+                
+                // Redirect to dashboard after 1 second
+                setTimeout(() => {
+                    window.location.href = '/dashboard';
+                }, 1000);
+            } else {
+                showMessage('Invalid username or password. Try: admin/admin123', 'error');
+            }
+        });
+        
+        registerForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const name = document.getElementById('register-name').value;
+            const username = document.getElementById('register-username').value;
+            const password = document.getElementById('register-password').value;
+            const confirmPassword = document.getElementById('register-confirm-password').value;
+            
+            if (!name || !username || !password || !confirmPassword) {
+                showMessage('Please fill in all fields.', 'error');
+                return;
+            }
+            
+            if (password !== confirmPassword) {
+                showMessage('Passwords do not match.', 'error');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showMessage('Password must be at least 6 characters.', 'error');
+                return;
+            }
+            
+            // Check if username already exists
+            if (users.find(u => u.username === username)) {
+                showMessage('Username already exists. Please choose another.', 'error');
+                return;
+            }
+            
+            // Add new user
+            users.push({ username, password, name });
+            
+            showMessage(`Registration successful! Welcome, ${name}!`, 'success');
+            
+            // Auto-switch to login form after successful registration
+            setTimeout(() => {
+                setActiveForm('login');
+                document.getElementById('login-username').value = username;
+                registerForm.reset();
+            }, 2000);
+        });
+        
+        forgotPasswordForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = document.getElementById('forgot-username').value;
+            
+            if (!username) {
+                showMessage('Please enter your username.', 'error');
+                return;
+            }
+            
+            const user = users.find(u => u.username === username);
+            
+            if (user) {
+                showMessage(`Password reset link sent! (Demo: Your password is "${user.password}")`, 'success');
+            } else {
+                showMessage('Username not found.', 'error');
+            }
+            
+            // Auto-switch back to login form
+            setTimeout(() => {
+                setActiveForm('login');
+                forgotPasswordForm.reset();
+            }, 3000);
+        });
+        
+        // Helper functions
+        function setActiveForm(formType) {
+            // Reset all forms and buttons
+            loginForm.classList.remove('active');
+            registerForm.classList.remove('active');
+            forgotPasswordForm.classList.remove('active');
+            loginToggle.classList.remove('active');
+            registerToggle.classList.remove('active');
+            
+            // Activate selected form and button
+            if (formType === 'login') {
+                loginForm.classList.add('active');
+                loginToggle.classList.add('active');
+            } else if (formType === 'register') {
+                registerForm.classList.add('active');
+                registerToggle.classList.add('active');
+            } else if (formType === 'forgot') {
+                forgotPasswordForm.classList.add('active');
+            }
+            
+            hideMessage();
+        }
+        
+        function showMessage(text, type) {
+            message.textContent = text;
+            message.className = 'message ' + type;
+            message.style.display = 'block';
+            
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    hideMessage();
+                }, 5000);
+            }
+        }
+        
+        function hideMessage() {
+            message.style.display = 'none';
+        }
+        
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('SensorWatch Login System loaded successfully!');
+            
+            // Focus on the first input field of the active form
+            const activeForm = document.querySelector('.form.active');
+            if (activeForm) {
+                const firstInput = activeForm.querySelector('input');
+                if (firstInput) {
+                    firstInput.focus();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
