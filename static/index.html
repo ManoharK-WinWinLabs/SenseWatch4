@@ -10,6 +10,7 @@
   
   <!-- Chart.js for graphing -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1"></script>
 
   <script>
     tailwind.config = {
@@ -113,6 +114,75 @@
       margin-bottom: 15px;
       text-align: center;
     }
+    
+    .threshold-controls {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+    
+    .threshold-input {
+      background: #40424f;
+      color: white;
+      border: 1px solid #98F190;
+      padding: 8px 12px;
+      border-radius: 6px;
+      width: 80px;
+      text-align: center;
+      font-size: 14px;
+    }
+    
+    .threshold-input:focus {
+      outline: none;
+      border-color: #98F190;
+      box-shadow: 0 0 0 2px rgba(152, 241, 144, 0.2);
+    }
+    
+    .threshold-label {
+      color: #a0aec0;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .warning-list {
+      background: #3D1F1F;
+      border: 1px solid #FB7A7C;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 15px;
+    }
+    
+    .warning-item {
+      color: #FB7A7C;
+      font-size: 14px;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .warning-item:last-child {
+      margin-bottom: 0;
+    }
+    
+    .save-thresholds-btn {
+      background: #98F190;
+      color: #00361C;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 14px;
+      transition: opacity 0.3s;
+    }
+    
+    .save-thresholds-btn:hover {
+      opacity: 0.8;
+    }
   </style>
 </head>
 <body class="bg-deepblack text-white font-sans">
@@ -199,19 +269,53 @@
       <!-- Temperature Graph Section -->
       <div class="chart-section">
         <div class="chart-title">🌡️ Temperature Readings</div>
+        
+        <!-- Threshold Controls -->
+        <div class="threshold-controls">
+          <span class="threshold-label">Min:</span>
+          <input type="number" id="tempMin" class="threshold-input" step="0.1" placeholder="32">
+          <span class="threshold-label">°F</span>
+          
+          <span class="threshold-label">Max:</span>
+          <input type="number" id="tempMax" class="threshold-input" step="0.1" placeholder="100">
+          <span class="threshold-label">°F</span>
+          
+          <button class="save-thresholds-btn" onclick="saveThresholds()">💾 Save Thresholds</button>
+        </div>
+        
         <div class="chart-container">
           <canvas id="temperatureChart"></canvas>
         </div>
         <div class="flex justify-center flex-wrap gap-6 mt-4" id="tempStats"></div>
+        
+        <!-- Temperature Warnings -->
+        <div id="tempWarnings"></div>
       </div>
       
       <!-- Humidity Graph Section -->
       <div class="chart-section">
         <div class="chart-title">💧 Humidity Readings</div>
+        
+        <!-- Threshold Controls -->
+        <div class="threshold-controls">
+          <span class="threshold-label">Min:</span>
+          <input type="number" id="humidityMin" class="threshold-input" step="0.1" placeholder="20">
+          <span class="threshold-label">%</span>
+          
+          <span class="threshold-label">Max:</span>
+          <input type="number" id="humidityMax" class="threshold-input" step="0.1" placeholder="80">
+          <span class="threshold-label">%</span>
+          
+          <button class="save-thresholds-btn" onclick="saveThresholds()">💾 Save Thresholds</button>
+        </div>
+        
         <div class="chart-container">
           <canvas id="humidityChart"></canvas>
         </div>
         <div class="flex justify-center flex-wrap gap-6 mt-4" id="humidityStats"></div>
+        
+        <!-- Humidity Warnings -->
+        <div id="humidityWarnings"></div>
       </div>
     </div>
   </div>
@@ -228,33 +332,103 @@
     let humidityChart = null;
     let autoRefreshInterval = null;
 
-    // Check if sensor reading has warnings (outside normal range)
-    function checkSensorWarnings(reading) {
+    // Default thresholds
+    const DEFAULT_THRESHOLDS = {
+      tempMin: 32,
+      tempMax: 100,
+      humidityMin: 20,
+      humidityMax: 80
+    };
+
+    // Get thresholds for a specific sensor (from localStorage)
+    function getThresholds(sensorId) {
+      const key = `thresholds_${sensorId}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+      return { ...DEFAULT_THRESHOLDS };
+    }
+
+    // Save thresholds for current sensor
+    function saveThresholds() {
+      if (!currentSensorId) return;
+      
+      const thresholds = {
+        tempMin: parseFloat(document.getElementById('tempMin').value) || DEFAULT_THRESHOLDS.tempMin,
+        tempMax: parseFloat(document.getElementById('tempMax').value) || DEFAULT_THRESHOLDS.tempMax,
+        humidityMin: parseFloat(document.getElementById('humidityMin').value) || DEFAULT_THRESHOLDS.humidityMin,
+        humidityMax: parseFloat(document.getElementById('humidityMax').value) || DEFAULT_THRESHOLDS.humidityMax
+      };
+      
+      const key = `thresholds_${currentSensorId}`;
+      localStorage.setItem(key, JSON.stringify(thresholds));
+      
+      showModalStatus(`✓ Thresholds saved for ${currentSensorId}`, 'success');
+      
+      // Refresh the graphs to show new threshold lines
+      setTimeout(() => {
+        fetchAndPlotSensorData();
+      }, 500);
+    }
+
+    // Load thresholds into input fields
+    function loadThresholds(sensorId) {
+      const thresholds = getThresholds(sensorId);
+      document.getElementById('tempMin').value = thresholds.tempMin;
+      document.getElementById('tempMax').value = thresholds.tempMax;
+      document.getElementById('humidityMin').value = thresholds.humidityMin;
+      document.getElementById('humidityMax').value = thresholds.humidityMax;
+    }
+
+    // Check if sensor reading has warnings (using custom thresholds)
+    function checkSensorWarnings(reading, sensorId) {
       if (!reading) return false;
       
+      const thresholds = sensorId ? getThresholds(sensorId) : DEFAULT_THRESHOLDS;
       const warnings = [];
       
-      // Temperature thresholds (adjust these based on your requirements)
-      const TEMP_MIN = 32;  // 32°F (freezing)
-      const TEMP_MAX = 100; // 100°F
-      
-      // Humidity thresholds
-      const HUMIDITY_MIN = 20; // 20%
-      const HUMIDITY_MAX = 80; // 80%
-      
       if (reading.temp_value !== undefined) {
-        if (reading.temp_value < TEMP_MIN || reading.temp_value > TEMP_MAX) {
+        if (reading.temp_value < thresholds.tempMin || reading.temp_value > thresholds.tempMax) {
           warnings.push('temperature');
         }
       }
       
       if (reading.humidity !== undefined) {
-        if (reading.humidity < HUMIDITY_MIN || reading.humidity > HUMIDITY_MAX) {
+        if (reading.humidity < thresholds.humidityMin || reading.humidity > thresholds.humidityMax) {
           warnings.push('humidity');
         }
       }
       
       return warnings.length > 0;
+    }
+
+    // Get detailed warnings for a sensor
+    function getDetailedWarnings(reading, sensorId) {
+      if (!reading) return { temp: [], humidity: [] };
+      
+      const thresholds = getThresholds(sensorId);
+      const warnings = { temp: [], humidity: [] };
+      
+      if (reading.temp_value !== undefined) {
+        if (reading.temp_value < thresholds.tempMin) {
+          warnings.temp.push(`⚠️ Too Cold: ${reading.temp_value.toFixed(1)}°F < ${thresholds.tempMin}°F`);
+        }
+        if (reading.temp_value > thresholds.tempMax) {
+          warnings.temp.push(`⚠️ Too Hot: ${reading.temp_value.toFixed(1)}°F > ${thresholds.tempMax}°F`);
+        }
+      }
+      
+      if (reading.humidity !== undefined) {
+        if (reading.humidity < thresholds.humidityMin) {
+          warnings.humidity.push(`⚠️ Too Dry: ${reading.humidity.toFixed(1)}% < ${thresholds.humidityMin}%`);
+        }
+        if (reading.humidity > thresholds.humidityMax) {
+          warnings.humidity.push(`⚠️ Too Humid: ${reading.humidity.toFixed(1)}% > ${thresholds.humidityMax}%`);
+        }
+      }
+      
+      return warnings;
     }
 
     // Fetch latest reading for a sensor
@@ -319,8 +493,8 @@
         const cardPromises = sensorIds.map(async (sensorId, index) => {
           const latestReading = await fetchLatestReading(sensorId);
           
-          // Check if this sensor has warnings
-          if (checkSensorWarnings(latestReading)) {
+          // Check if this sensor has warnings (using its custom thresholds)
+          if (checkSensorWarnings(latestReading, sensorId)) {
             warningCount++;
           }
           
@@ -362,7 +536,7 @@
       link.className = 'block cursor-pointer group focus:outline-none focus:ring-2 focus:ring-limegreen rounded-xl';
       
       const sensorValue = formatSensorValue(reading);
-      const hasWarning = checkSensorWarnings(reading);
+      const hasWarning = checkSensorWarnings(reading, sensorId);
       
       // Determine card styling based on warning status
       const cardBgClass = hasWarning ? 'bg-[#3D1F1F] border-2 border-pinkaccent' : 'bg-lightgrey';
@@ -393,6 +567,9 @@
       currentSensorId = sensorId;
       document.getElementById('modalSensorTitle').textContent = `${sensorId} - Temperature & Humidity`;
       document.getElementById('sensorModal').style.display = 'block';
+      
+      // Load thresholds for this sensor
+      loadThresholds(sensorId);
       
       // Initial data load
       fetchAndPlotSensorData();
@@ -535,7 +712,7 @@
     }
 
     // Plot temperature data
-    function plotTemperatureData(timestamps, values, sensorId) {
+    function plotTemperatureData(timestamps, values, sensorId, thresholds) {
       const ctx = document.getElementById('temperatureChart').getContext('2d');
       if (temperatureChart) temperatureChart.destroy();
 
@@ -571,6 +748,40 @@
               bodyColor: '#a0aec0',
               borderColor: '#FB7A7C',
               borderWidth: 1
+            },
+            annotation: {
+              annotations: {
+                minLine: {
+                  type: 'line',
+                  yMin: thresholds.tempMin,
+                  yMax: thresholds.tempMin,
+                  borderColor: '#EFFF7C',
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  label: {
+                    content: `Min: ${thresholds.tempMin}°F`,
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: '#EFFF7C',
+                    color: '#000'
+                  }
+                },
+                maxLine: {
+                  type: 'line',
+                  yMin: thresholds.tempMax,
+                  yMax: thresholds.tempMax,
+                  borderColor: '#EFFF7C',
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  label: {
+                    content: `Max: ${thresholds.tempMax}°F`,
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: '#EFFF7C',
+                    color: '#000'
+                  }
+                }
+              }
             }
           },
           scales: {
@@ -591,7 +802,7 @@
     }
 
     // Plot humidity data
-    function plotHumidityData(timestamps, values, sensorId) {
+    function plotHumidityData(timestamps, values, sensorId, thresholds) {
       const ctx = document.getElementById('humidityChart').getContext('2d');
       if (humidityChart) humidityChart.destroy();
 
@@ -627,6 +838,40 @@
               bodyColor: '#a0aec0',
               borderColor: '#98F190',
               borderWidth: 1
+            },
+            annotation: {
+              annotations: {
+                minLine: {
+                  type: 'line',
+                  yMin: thresholds.humidityMin,
+                  yMax: thresholds.humidityMin,
+                  borderColor: '#EFFF7C',
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  label: {
+                    content: `Min: ${thresholds.humidityMin}%`,
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: '#EFFF7C',
+                    color: '#000'
+                  }
+                },
+                maxLine: {
+                  type: 'line',
+                  yMin: thresholds.humidityMax,
+                  yMax: thresholds.humidityMax,
+                  borderColor: '#EFFF7C',
+                  borderWidth: 2,
+                  borderDash: [5, 5],
+                  label: {
+                    content: `Max: ${thresholds.humidityMax}%`,
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: '#EFFF7C',
+                    color: '#000'
+                  }
+                }
+              }
             }
           },
           scales: {
@@ -660,29 +905,60 @@
       try {
         const data = await fetchSensorData(currentSensorId, limit);
         const { timestamps, temperatureValues, humidityValues } = parseData(data);
+        const thresholds = getThresholds(currentSensorId);
+
+        // Check for warnings in latest reading
+        const latestReading = data[0];
+        const warnings = getDetailedWarnings(latestReading, currentSensorId);
 
         // Plot temperature
         if (temperatureValues.some(v => v !== null)) {
-          plotTemperatureData(timestamps, temperatureValues, currentSensorId);
+          plotTemperatureData(timestamps, temperatureValues, currentSensorId, thresholds);
           displayStats(calculateStats(temperatureValues), 'tempStats', '°F');
+          displayWarnings(warnings.temp, 'tempWarnings');
         } else {
           document.getElementById('tempStats').innerHTML = '<p class="text-gray-400">No temperature data available</p>';
+          document.getElementById('tempWarnings').innerHTML = '';
         }
 
         // Plot humidity
         if (humidityValues.some(v => v !== null)) {
-          plotHumidityData(timestamps, humidityValues, currentSensorId);
+          plotHumidityData(timestamps, humidityValues, currentSensorId, thresholds);
           displayStats(calculateStats(humidityValues), 'humidityStats', '%');
+          displayWarnings(warnings.humidity, 'humidityWarnings');
         } else {
           document.getElementById('humidityStats').innerHTML = '<p class="text-gray-400">No humidity data available</p>';
+          document.getElementById('humidityWarnings').innerHTML = '';
         }
 
         const totalPoints = timestamps.length;
-        showModalStatus(`✓ Loaded ${totalPoints} readings from ${currentSensorId}`, 'success');
+        const totalWarnings = warnings.temp.length + warnings.humidity.length;
+        
+        if (totalWarnings > 0) {
+          showModalStatus(`⚠️ ${totalWarnings} warning(s) detected | Loaded ${totalPoints} readings`, 'error');
+        } else {
+          showModalStatus(`✓ All readings normal | Loaded ${totalPoints} readings`, 'success');
+        }
       } catch (error) {
         showModalStatus(`✗ Error fetching ${currentSensorId}: ${error.message}`, 'error');
         console.error('Full error:', error);
       }
+    }
+
+    // Display warnings under graphs
+    function displayWarnings(warningsList, elementId) {
+      const container = document.getElementById(elementId);
+      
+      if (!warningsList || warningsList.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+      
+      const warningsHtml = warningsList.map(warning => 
+        `<div class="warning-item">${warning}</div>`
+      ).join('');
+      
+      container.innerHTML = `<div class="warning-list">${warningsHtml}</div>`;
     }
 
     // Initialize GSAP animations
