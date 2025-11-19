@@ -183,28 +183,45 @@
     .save-thresholds-btn:hover {
       opacity: 0.8;
     }
+
+    .logout-btn {
+      background: #FB7A7C;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .logout-btn:hover {
+      background: #e56668;
+      transform: translateY(-1px);
+    }
   </style>
 </head>
 <body class="bg-deepblack text-white font-sans">
+  <!-- Authentication check -->
+  <script>
+    // Check if user is logged in
+    if (sessionStorage.getItem('isLoggedIn') !== 'true') {
+      window.location.href = '/';
+    }
+
+    // Logout function
+    function logout() {
+      if (confirm('Are you sure you want to logout?')) {
+        sessionStorage.clear();
+        window.location.href = '/';
+      }
+    }
+  </script>
+
   <div class="flex h-screen">
     <!-- Sidebar -->
     <aside class="w-64 bg-darkaccent p-6">
       <h1 class="text-2xl font-bold mb-6">SensorWatch</h1>
-
-      <!-- Add a class for GSAP targeting -->
-      <div class="space-y-4">
-        <div class="bg-lightgrey text-white p-4 rounded-xl notification-item opacity-0 translate-y-4">
-          <p class="font-bold text-lg">Freezer A</p>
-          <p class="text-sm text-white">Temp dropped below range</p>
-          <p class="text-xs text-white mt-1">🕒 12:23 • 30 min ago</p>
-        </div>
-
-        <div class="bg-lightgrey text-white p-4 rounded-xl notification-item opacity-0 translate-y-4">
-          <p class="font-bold text-lg">Oven B</p>
-          <p class="text-sm text-white">Temp dropped below range</p>
-          <p class="text-xs text-white mt-1">🕒 12:23 • 30 min ago</p>
-        </div>
-      </div>
     </aside>
 
     <!-- Main Content -->
@@ -222,9 +239,9 @@
           </div>
         </div>
         <div class="flex items-center gap-4">
-          <button class="text-white">🔔</button>
-          <button class="text-white">💬</button>
-          <img src="https://via.placeholder.com/40" class="rounded-full w-10 h-10" alt="Profile" />
+          <button class="logout-btn" onclick="logout()">
+            🚪 Logout
+          </button>
         </div>
       </div>
 
@@ -1020,32 +1037,7 @@
 
     // Initialize GSAP animations
     function initializeAnimations() {
-      // Sidebar notifications: staggered slide/fade-in
-      const items = document.querySelectorAll('.notification-item');
-      if (items.length) {
-        gsap.to(items, {
-          opacity: 1,
-          y: 0,
-          duration: 0.6,
-          ease: 'power3.out',
-          stagger: 0.15
-        });
-
-        // Gentle attention pulse after entrance
-        items.forEach((el, i) => {
-          gsap.to(el, {
-            scale: 1.02,
-            duration: 0.8,
-            yoyo: true,
-            repeat: 2,
-            delay: 0.6 + i * 0.1,
-            ease: 'sine.inOut',
-            transformOrigin: 'center'
-          });
-        });
-      }
-
-      // Optional: sensor card hover lift using GSAP (progressive enhancement)
+      // Sensor card hover lift using GSAP
       const cards = document.querySelectorAll('.sensor-card');
       cards.forEach(card => {
         card.addEventListener('mouseenter', () => {
