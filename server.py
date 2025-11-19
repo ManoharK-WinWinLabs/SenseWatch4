@@ -279,6 +279,12 @@ async def health_check():
         },
         "timestamp": datetime.now().isoformat()
     }
+@app.get("/health1")
+async def health1_check():
+    """Detailed health check endpoint"""
+
+    
+    return 'healthy', 200
 
 # POST endpoint to receive sensor data (REST API fallback)
 @app.post("/data", status_code=201)
@@ -431,3 +437,4 @@ if __name__ == "__main__":
         port=int(os.getenv('PORT', '8000')),
         log_level="info"
     )
+
