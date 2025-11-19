@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from datetime import datetime
 import mysql.connector
@@ -9,6 +11,7 @@ import json
 import threading
 import os
 from typing import List, Optional
+from pathlib import Path
 
 app = FastAPI(
     title="Sensor Data API", 
@@ -233,10 +236,21 @@ def start_mqtt_client():
     except Exception as e:
         print(f"❌ Failed to connect to MQTT Broker: {e}")
 
-# Root endpoint - THIS IS CRITICAL FOR COOLIFY HEALTH CHECKS
+# Mount static files directory (if it exists)
+static_path = Path("/app/static")
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
+# Root endpoint - Serve index.html or API info
 @app.get("/")
 async def root():
-    """Root endpoint - Coolify health check"""
+    """Root endpoint - Serve dashboard or API info"""
+    # Check if index.html exists in static folder
+    index_file = Path("/app/static/index.html")
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    
+    # Fallback to API info
     return {
         "status": "healthy",
         "message": "Sensor Data API is running",
@@ -279,11 +293,11 @@ async def health_check():
         },
         "timestamp": datetime.now().isoformat()
     }
+
 @app.get("/hc")
 async def hc():
-    """Detailed health check endpoint"""
+    """Healthcheck endpoint for Coolify"""
     print("check hc end point hit")
-    
     return "healthy"
 
 # POST endpoint to receive sensor data (REST API fallback)
@@ -437,5 +451,3 @@ if __name__ == "__main__":
         port=int(os.getenv('PORT', '8000')),
         log_level="info"
     )
-
-
