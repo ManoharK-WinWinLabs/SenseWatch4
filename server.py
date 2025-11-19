@@ -440,14 +440,14 @@ static_path = Path("/app/static")
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-# Root endpoint - Serve index.html or API info
+# Root endpoint - Serve login page
 @app.get("/")
 async def root():
-    """Root endpoint - Serve dashboard or API info"""
-    # Check if index.html exists in static folder
-    index_file = Path("/app/static/index.html")
-    if index_file.exists():
-        return FileResponse(str(index_file))
+    """Root endpoint - Serve login page"""
+    # Check if login.html exists in static folder
+    login_file = Path("/app/static/login.html")
+    if login_file.exists():
+        return FileResponse(str(login_file))
     
     # Fallback to API info
     return {
@@ -455,6 +455,8 @@ async def root():
         "message": "Sensor Data API is running",
         "version": "1.0.0",
         "endpoints": {
+            "GET /": "Login page",
+            "GET /dashboard": "Dashboard (requires authentication)",
             "POST /data": "Submit single sensor data record",
             "POST /data/bulk": "Submit multiple sensor data records from JSON array",
             "GET /sensors": "List all sensors",
@@ -463,6 +465,23 @@ async def root():
             "GET /docs": "API documentation"
         }
     }
+
+# Dashboard endpoint - Serve dashboard page
+@app.get("/dashboard")
+async def dashboard():
+    """Dashboard endpoint - Serve the main dashboard"""
+    # Check if dashboard.html exists in static folder
+    dashboard_file = Path("/app/static/dashboard.html")
+    if dashboard_file.exists():
+        return FileResponse(str(dashboard_file))
+    
+    # Fallback to index.html for backward compatibility
+    index_file = Path("/app/static/index.html")
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    
+    # If neither exists, return error
+    raise HTTPException(status_code=404, detail="Dashboard not found")
 
 @app.get("/health")
 async def health_check():
