@@ -14,11 +14,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY server.py .
-
-# Copy static files (HTML, CSS, JS) if they exist
-COPY static/ ./static/ 2>/dev/null || true
+# Copy all application files (includes server.py and static/ folder)
+COPY . .
 
 # Expose port
 EXPOSE 8000
