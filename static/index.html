@@ -320,14 +320,68 @@
     function openGrafana() {
       const modal = document.getElementById('grafanaModal');
       const iframe = document.getElementById('grafanaFrame');
+      const statusText = document.getElementById('grafana-status');
+      const errorMessage = document.getElementById('grafana-error-message');
+      
+      // Reset error message
+      errorMessage.style.display = 'none';
+      iframe.style.display = 'block';
+      statusText.textContent = 'Loading Grafana dashboard...';
+      statusText.style.color = '#a0aec0';
       
       // Set the iframe source only when opening (improves performance)
       if (!iframe.src) {
         iframe.src = GRAFANA_URL;
+        
+        // Detect if iframe fails to load (X-Frame-Options blocking)
+        let loadTimeout = setTimeout(() => {
+          // After 3 seconds, check if iframe loaded
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            if (!iframeDoc || iframeDoc.body.children.length === 0) {
+              showGrafanaError();
+            }
+          } catch (e) {
+            // Cross-origin error means X-Frame-Options is blocking
+            showGrafanaError();
+          }
+        }, 3000);
+        
+        // If iframe loads successfully, clear timeout
+        iframe.onload = function() {
+          clearTimeout(loadTimeout);
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            if (iframeDoc && iframeDoc.body) {
+              statusText.textContent = 'Grafana dashboard loaded successfully';
+              statusText.style.color = '#98F190';
+              setTimeout(() => {
+                statusText.textContent = 'Powered by Grafana - Real-time monitoring and visualization';
+              }, 2000);
+            }
+          } catch (e) {
+            showGrafanaError();
+          }
+        };
+        
+        iframe.onerror = function() {
+          showGrafanaError();
+        };
       }
       
       modal.style.display = 'block';
       document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
+    
+    function showGrafanaError() {
+      const iframe = document.getElementById('grafanaFrame');
+      const statusText = document.getElementById('grafana-status');
+      const errorMessage = document.getElementById('grafana-error-message');
+      
+      iframe.style.display = 'none';
+      errorMessage.style.display = 'block';
+      statusText.textContent = 'Embedding blocked by Grafana security settings';
+      statusText.style.color = '#FB7A7C';
     }
     
     function closeGrafana() {
@@ -372,13 +426,12 @@
       <h1 class="text-2xl font-bold mb-6">SensorWatch</h1>
       
       <div class="mt-6">
-        <a href="#" onclick="openGrafana(); return false;" class="flex items-center gap-3 text-gray-300 hover:text-limegreen transition-colors py-3 px-4 rounded-lg hover:bg-lightgrey">
+        <a href="https://decrease-hills-interactions-commerce.trycloudflare.com/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-3 text-gray-300 hover:text-limegreen transition-colors py-3 px-4 rounded-lg hover:bg-lightgrey">
           <span class="text-xl">📊</span>
-          <span class="font-semibold">Analytics Dashboard</span>
-        </a>
-        <a href="https://decrease-hills-interactions-commerce.trycloudflare.com/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-3 text-gray-400 hover:text-gray-300 transition-colors py-2 px-4 rounded-lg hover:bg-lightgrey mt-1 text-sm">
-          <span>↗</span>
-          <span>Open in New Tab</span>
+          <div>
+            <div class="font-semibold">Analytics Dashboard</div>
+            <div class="text-xs text-gray-500">Opens in new tab</div>
+          </div>
         </a>
       </div>
     </aside>
@@ -398,9 +451,9 @@
           </div>
         </div>
         <div class="flex items-center gap-4">
-          <button class="analytics-btn" onclick="openGrafana()">
+          <a href="https://decrease-hills-interactions-commerce.trycloudflare.com/" target="_blank" rel="noopener noreferrer" class="analytics-btn" style="text-decoration: none; display: inline-block;">
             📊 Analytics
-          </button>
+          </a>
           <button class="logout-btn" onclick="logout()">
             🚪 Logout
           </button>
@@ -508,16 +561,26 @@
       <div class="grafana-header">
         <div>
           <div class="grafana-title">📊 Advanced Analytics Dashboard</div>
-          <div class="grafana-subtitle">Powered by Grafana - Real-time monitoring and visualization</div>
+          <div class="grafana-subtitle" id="grafana-status">Loading Grafana dashboard...</div>
         </div>
         <span class="grafana-close" onclick="closeGrafana()">&times;</span>
+      </div>
+      <div id="grafana-error-message" style="display: none; background: #3D1F1F; border: 2px solid #FB7A7C; border-radius: 8px; padding: 20px; margin: 20px 0; color: #FB7A7C;">
+        <h3 style="margin-top: 0; color: #FB7A7C;">⚠️ Unable to Display Grafana in Modal</h3>
+        <p>Grafana cannot be embedded due to security restrictions (X-Frame-Options).</p>
+        <p><strong>Solution:</strong> Click the button below to open Grafana in a new tab:</p>
+        <a href="https://decrease-hills-interactions-commerce.trycloudflare.com/" target="_blank" rel="noopener noreferrer" 
+           style="display: inline-block; background: #98F190; color: #00361C; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px;">
+          🚀 Open Grafana in New Tab
+        </a>
       </div>
       <iframe 
         id="grafanaFrame" 
         class="grafana-iframe"
         src=""
         frameborder="0"
-        allowfullscreen>
+        allowfullscreen
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms">
       </iframe>
     </div>
   </div>
