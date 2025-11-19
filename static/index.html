@@ -199,6 +199,103 @@
       background: #e56668;
       transform: translateY(-1px);
     }
+
+    .analytics-btn {
+      background: #98F190;
+      color: #00361C;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .analytics-btn:hover {
+      background: #7fd977;
+      transform: translateY(-1px);
+    }
+
+    .grafana-modal {
+      display: none;
+      position: fixed;
+      z-index: 2000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: rgba(0,0,0,0.95);
+      animation: fadeIn 0.3s ease;
+    }
+
+    .grafana-modal-content {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding: 20px;
+    }
+
+    .grafana-close {
+      position: absolute;
+      top: 30px;
+      right: 40px;
+      color: #98F190;
+      font-size: 40px;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 2001;
+      transition: color 0.3s;
+      background: rgba(30, 31, 37, 0.9);
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .grafana-close:hover,
+    .grafana-close:focus {
+      color: #FB7A7C;
+      transform: rotate(90deg);
+      transition: all 0.3s;
+    }
+
+    .grafana-iframe {
+      width: 100%;
+      height: calc(100% - 20px);
+      border: 3px solid #98F190;
+      border-radius: 12px;
+      background: white;
+    }
+
+    .grafana-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding: 0 10px;
+    }
+
+    .grafana-title {
+      color: #98F190;
+      font-size: 24px;
+      font-weight: bold;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    }
+
+    .grafana-subtitle {
+      color: #a0aec0;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
   </style>
 </head>
 <body class="bg-deepblack text-white font-sans">
@@ -216,12 +313,74 @@
         window.location.href = '/';
       }
     }
+
+    // Grafana Modal Functions
+    const GRAFANA_URL = 'https://decrease-hills-interactions-commerce.trycloudflare.com/';
+    
+    function openGrafana() {
+      const modal = document.getElementById('grafanaModal');
+      const iframe = document.getElementById('grafanaFrame');
+      
+      // Set the iframe source only when opening (improves performance)
+      if (!iframe.src) {
+        iframe.src = GRAFANA_URL;
+      }
+      
+      modal.style.display = 'block';
+      document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
+    
+    function closeGrafana() {
+      const modal = document.getElementById('grafanaModal');
+      modal.style.display = 'none';
+      document.body.style.overflow = 'auto'; // Restore scrolling
+    }
+    
+    // Close modal when clicking outside the iframe
+    window.onclick = function(event) {
+      const modal = document.getElementById('grafanaModal');
+      if (event.target == modal) {
+        closeGrafana();
+      }
+      
+      // Also handle sensor modal
+      const sensorModal = document.getElementById('sensorModal');
+      if (event.target == sensorModal) {
+        closeSensorModal();
+      }
+    }
+    
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') {
+        const grafanaModal = document.getElementById('grafanaModal');
+        const sensorModal = document.getElementById('sensorModal');
+        
+        if (grafanaModal.style.display === 'block') {
+          closeGrafana();
+        }
+        if (sensorModal.style.display === 'block') {
+          closeSensorModal();
+        }
+      }
+    });
   </script>
 
   <div class="flex h-screen">
     <!-- Sidebar -->
     <aside class="w-64 bg-darkaccent p-6">
       <h1 class="text-2xl font-bold mb-6">SensorWatch</h1>
+      
+      <div class="mt-6">
+        <a href="#" onclick="openGrafana(); return false;" class="flex items-center gap-3 text-gray-300 hover:text-limegreen transition-colors py-3 px-4 rounded-lg hover:bg-lightgrey">
+          <span class="text-xl">📊</span>
+          <span class="font-semibold">Analytics Dashboard</span>
+        </a>
+        <a href="https://decrease-hills-interactions-commerce.trycloudflare.com/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-3 text-gray-400 hover:text-gray-300 transition-colors py-2 px-4 rounded-lg hover:bg-lightgrey mt-1 text-sm">
+          <span>↗</span>
+          <span>Open in New Tab</span>
+        </a>
+      </div>
     </aside>
 
     <!-- Main Content -->
@@ -239,6 +398,9 @@
           </div>
         </div>
         <div class="flex items-center gap-4">
+          <button class="analytics-btn" onclick="openGrafana()">
+            📊 Analytics
+          </button>
           <button class="logout-btn" onclick="logout()">
             🚪 Logout
           </button>
@@ -337,6 +499,26 @@
         <!-- Humidity Warnings -->
         <div id="humidityWarnings"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Grafana Analytics Modal -->
+  <div id="grafanaModal" class="grafana-modal">
+    <div class="grafana-modal-content">
+      <div class="grafana-header">
+        <div>
+          <div class="grafana-title">📊 Advanced Analytics Dashboard</div>
+          <div class="grafana-subtitle">Powered by Grafana - Real-time monitoring and visualization</div>
+        </div>
+        <span class="grafana-close" onclick="closeGrafana()">&times;</span>
+      </div>
+      <iframe 
+        id="grafanaFrame" 
+        class="grafana-iframe"
+        src=""
+        frameborder="0"
+        allowfullscreen>
+      </iframe>
     </div>
   </div>
 
@@ -1050,12 +1232,7 @@
     }
 
     // Close modal when clicking outside
-    window.onclick = function(event) {
-      const modal = document.getElementById('sensorModal');
-      if (event.target == modal) {
-        closeSensorModal();
-      }
-    }
+    // (Already handled in the global window.onclick above)
 
     // Load sensors when page loads
     window.addEventListener('DOMContentLoaded', () => {
