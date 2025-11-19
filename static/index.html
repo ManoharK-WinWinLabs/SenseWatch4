@@ -1,1 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SensorWatch Dashboard</title>
 
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            limegreen: '#98F190',
+            darkaccent: '#1E1F25',
+            lightgrey: '#40424f',
+            pinkaccent: '#FB7A7C',
+            lightred: '#610002',
+            yellowbtn: '#EFFF7C',
+            deepblack: '#09090B',
+            greenbtntext: '#00361C'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- GSAP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+</head>
+<body class="bg-deepblack text-white font-sans">
+  <div class="flex h-screen">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-darkaccent p-6">
+      <h1 class="text-2xl font-bold mb-6">SensorWatch</h1>
+
+      <!-- Add a class for GSAP targeting -->
+      <div class="space-y-4">
+        <div class="bg-lightgrey text-white p-4 rounded-xl notification-item opacity-0 translate-y-4">
+          <p class="font-bold text-lg">Freezer A</p>
+          <p class="text-sm text-white">Temp dropped below range</p>
+          <p class="text-xs text-white mt-1">🕒 12:23 • 30 min ago</p>
+        </div>
+
+        <div class="bg-lightgrey text-white p-4 rounded-xl notification-item opacity-0 translate-y-4">
+          <p class="font-bold text-lg">Oven B</p>
+          <p class="text-sm text-white">Temp dropped below range</p>
+          <p class="text-xs text-white mt-1">🕒 12:23 • 30 min ago</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8 overflow-y-auto">
+      <!-- Top Bar -->
+      <div class="flex justify-between items-center mb-6">
+        <div class="flex gap-4">
+          <div class="bg-limegreen text-greenbtntext px-6 py-4 rounded-xl text-center">
+            <p class="text-4xl font-extrabold" id="active-sensors-count">--</p>
+            <p class="font-semibold">Active Sensors</p>
+          </div>
+          <div class="bg-pinkaccent text-lightred px-6 py-4 rounded-xl text-center">
+            <p class="text-4xl font-extrabold">3</p>
+            <p class="font-semibold">Sensor Warnings</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <button class="text-white">🔔</button>
+          <button class="text-white">💬</button>
+          <img src="https://via.placeholder.com/40" class="rounded-full w-10 h-10" alt="Profile" />
+        </div>
+      </div>
+
+      <!-- Devices Section -->
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-2xl font-bold">Devices</h2>
+        <div class="flex gap-2">
+          <input type="text" placeholder="Search sensors" class="bg-lightgrey text-white px-3 py-2 rounded placeholder-gray-400 focus:outline-none">
+          <select class="bg-lightgrey text-white rounded px-3 py-2">
+            <option>Location-Room</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Sensor Cards Grid -->
+      <div id="sensor-grid" class="grid grid-cols-2 xl:grid-cols-3 gap-6">
+        <!-- Loading state -->
+        <div class="col-span-full text-center text-gray-400 py-8">
+          <p>Loading sensors...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- JavaScript -->
+  <script>
+    // API endpoints - Using full domain URLs
+    const SENSOR_LIST_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
+    const SENSOR_READINGS_URL = 'https://sensorwatch4.winwinlabs.org/sensors';
+
+    // Fetch latest reading for a sensor
+    async function fetchLatestReading(sensorId) {
+      try {
+        const response = await fetch(`${SENSOR_READINGS_URL}/${sensorId}/readings?limit=20`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const readings = await response.json();
+        
+        // Return the first (latest) reading
+        if (readings && readings.length > 0) {
+          return readings[0];
+        }
+        
+        return null;
+      } catch (error) {
+        console.error(`Error fetching readings for ${sensorId}:`, error);
+        return null;
+      }
+    }
+
+    // Format the sensor reading value
+    function formatSensorValue(reading) {
+      if (!reading) {
+        return '--';
+      }
+      
+      // Check for temp_value field from your API
+      if (reading.temp_value !== undefined) {
+        return `${reading.temp_value.toFixed(1)}°F`;
+      }
+      
+      // Fallback to other common field names
+      if (reading.temperature !== undefined) {
+        return `${reading.temperature.toFixed(1)}°F`;
+      } else if (reading.temp !== undefined) {
+        return `${reading.temp.toFixed(1)}°F`;
+      } else if (reading.humidity !== undefined) {
+        return `${reading.humidity.toFixed(1)}%`;
+      } else if (reading.value !== undefined) {
+        const val = reading.value;
+        if (typeof val === 'number') {
+          return val.toFixed(1);
+        }
+        return val;
+      } else if (reading.reading !== undefined) {
+        const val = reading.reading;
+        if (typeof val === 'number') {
+          return val.toFixed(1);
+        }
+        return val;
+      }
+      
+      // If no known field, return the first numeric value found
+      for (const key in reading) {
+        if (typeof reading[key] === 'number' && key !== 'id') {
+          return reading[key].toFixed(1);
+        }
+      }
+      
+      return '--';
+    }
+
+    // Fetch and display sensors
+    async function fetchAndDisplaySensors() {
+      try {
+        const response = await fetch(SENSOR_LIST_URL);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const sensorIds = await response.json();
+        
+        // Update active sensor count
+        document.getElementById('active-sensors-count').textContent = sensorIds.length;
+        
+        // Generate sensor cards
+        const sensorGrid = document.getElementById('sensor-grid');
+        sensorGrid.innerHTML = ''; // Clear loading message
+        
+        // Create cards and fetch readings for each sensor
+        const cardPromises = sensorIds.map(async (sensorId, index) => {
+          const latestReading = await fetchLatestReading(sensorId);
+          return createSensorCard(sensorId, latestReading);
+        });
+        
+        // Wait for all cards to be created
+        const cards = await Promise.all(cardPromises);
+        
+        // Append all cards to the grid
+        cards.forEach(card => {
+          sensorGrid.appendChild(card);
+        });
+        
+        // Initialize GSAP animations after cards are created
+        initializeAnimations();
+        
+      } catch (error) {
+        console.error('Error fetching sensors:', error);
+        document.getElementById('sensor-grid').innerHTML = `
+          <div class="col-span-full text-center text-pinkaccent py-8">
+            <p>Unable to load sensors. Please check the API endpoint.</p>
+            <p class="text-sm text-gray-400 mt-2">${error.message}</p>
+          </div>
+        `;
+        // Set count to 0 on error
+        document.getElementById('active-sensors-count').textContent = '0';
+      }
+    }
+
+    // Create a sensor card element
+    function createSensorCard(sensorId, reading) {
+      const link = document.createElement('a');
+      link.href = `sensor.html?sensor=${sensorId}`;
+      link.className = 'block group focus:outline-none focus:ring-2 focus:ring-limegreen rounded-xl';
+      
+      const sensorValue = formatSensorValue(reading);
+      
+      link.innerHTML = `
+        <div class="bg-lightgrey p-6 rounded-xl sensor-card transition-colors group-hover:bg-[#4a4c5a]">
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-xl font-bold">${sensorId}</p>
+            </div>
+          </div>
+          <div class="flex justify-between items-end mt-6">
+            <div></div>
+            <div class="text-right">
+              <p class="text-limegreen text-2xl font-bold">${sensorValue}</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      return link;
+    }
+
+    // Initialize GSAP animations
+    function initializeAnimations() {
+      // Sidebar notifications: staggered slide/fade-in
+      const items = document.querySelectorAll('.notification-item');
+      if (items.length) {
+        gsap.to(items, {
+          opacity: 1,
+          y: 0,
+          duration: 0.6,
+          ease: 'power3.out',
+          stagger: 0.15
+        });
+
+        // Gentle attention pulse after entrance
+        items.forEach((el, i) => {
+          gsap.to(el, {
+            scale: 1.02,
+            duration: 0.8,
+            yoyo: true,
+            repeat: 2,
+            delay: 0.6 + i * 0.1,
+            ease: 'sine.inOut',
+            transformOrigin: 'center'
+          });
+        });
+      }
+
+      // Optional: sensor card hover lift using GSAP (progressive enhancement)
+      const cards = document.querySelectorAll('.sensor-card');
+      cards.forEach(card => {
+        card.addEventListener('mouseenter', () => {
+          gsap.to(card, { y: -4, duration: 0.2, ease: 'power2.out' });
+        });
+        card.addEventListener('mouseleave', () => {
+          gsap.to(card, { y: 0, duration: 0.2, ease: 'power2.out' });
+        });
+      });
+    }
+
+    // Load sensors when page loads
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchAndDisplaySensors();
+    });
+  </script>
+</body>
+</html>
