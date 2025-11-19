@@ -12,6 +12,9 @@ import threading
 import os
 from typing import List, Optional
 from pathlib import Path
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = FastAPI(
     title="Sensor Data API", 
@@ -42,6 +45,14 @@ MQTT_BROKER = os.getenv('MQTT_BROKER', 'localhost')
 MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
 MQTT_TOPIC = os.getenv('MQTT_TOPIC', 'sensor/data')
 MQTT_CLIENT_ID = os.getenv('MQTT_CLIENT_ID', 'sensor_server')
+
+# Email Configuration - Use environment variables
+EMAIL_ENABLED = os.getenv('EMAIL_ENABLED', 'false').lower() == 'true'
+SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
+SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
+ALERT_EMAIL = os.getenv('ALERT_EMAIL', '')  # Recipient email address
 
 # Global MQTT client variable
 mqtt_client = None
@@ -75,6 +86,27 @@ class SensorReading(BaseModel):
     temp_value: float = Field(..., description="Temperature value")
     humidity: float = Field(..., description="Humidity value")
 
+# Pydantic model for threshold configuration
+class ThresholdConfig(BaseModel):
+    sensor_id: str = Field(..., description="Sensor ID")
+    temp_min: float = Field(..., description="Minimum temperature threshold")
+    temp_max: float = Field(..., description="Maximum temperature threshold")
+    humidity_min: float = Field(..., description="Minimum humidity threshold")
+    humidity_max: float = Field(..., description="Maximum humidity threshold")
+    email: Optional[str] = Field(None, description="Email address for alerts")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "sensor_id": "SENSOR001",
+                "temp_min": 32.0,
+                "temp_max": 100.0,
+                "humidity_min": 20.0,
+                "humidity_max": 80.0,
+                "email": "user@example.com"
+            }
+        }
+
 def get_db_connection():
     """Create and return a database connection"""
     try:
@@ -103,6 +135,23 @@ def insert_sensor_data(data: SensorData):
         record_id = cursor.lastrowid
         cursor.close()
         connection.close()
+        
+        # Check thresholds and send alert if needed
+        thresholds = get_sensor_thresholds(data.sensor_id)
+        if thresholds:
+            reading = {
+                'temp_value': data.temp_value,
+                'humidity': data.humidity,
+                'timestamp': data.timestamp.isoformat()
+            }
+            violations = check_thresholds(data.sensor_id, reading, thresholds)
+            
+            if violations:
+                print(f"⚠️ Threshold violations detected for {data.sensor_id}: {violations}")
+                # Send email alert
+                recipient = thresholds.get('email') or ALERT_EMAIL
+                if recipient:
+                    send_email_alert(data.sensor_id, violations, reading, recipient)
         
         return record_id
         
@@ -164,6 +213,156 @@ def get_all_sensors():
         
     except Error as e:
         print(f"Error retrieving sensors: {e}")
+        if connection:
+            connection.close()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+def send_email_alert(sensor_id: str, violations: list, reading: dict, recipient_email: str):
+    """Send email alert for threshold violations"""
+    if not EMAIL_ENABLED or not ALERT_EMAIL:
+        print("⚠️ Email alerts not configured. Skipping email.")
+        return False
+    
+    try:
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = recipient_email or ALERT_EMAIL
+        msg['Subject'] = f"🚨 ALERT: Sensor {sensor_id} Threshold Violation"
+        
+        # Create email body
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #FB7A7C;">⚠️ Sensor Alert: {sensor_id}</h2>
+            <p style="font-size: 16px;">One or more thresholds have been violated.</p>
+            
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <h3>Current Readings:</h3>
+                <ul>
+                    <li><strong>Temperature:</strong> {reading.get('temp_value', 'N/A')}°F</li>
+                    <li><strong>Humidity:</strong> {reading.get('humidity', 'N/A')}%</li>
+                    <li><strong>Timestamp:</strong> {reading.get('timestamp', 'N/A')}</li>
+                </ul>
+            </div>
+            
+            <div style="background-color: #fed7d7; padding: 15px; border-radius: 5px; border-left: 4px solid #FB7A7C;">
+                <h3 style="color: #742a2a;">Violations Detected:</h3>
+                <ul style="color: #742a2a;">
+                    {''.join([f'<li>{v}</li>' for v in violations])}
+                </ul>
+            </div>
+            
+            <p style="margin-top: 20px; color: #666;">
+                <em>This is an automated alert from your SensorWatch system.</em><br>
+                <em>Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</em>
+            </p>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Send email
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"✅ Email alert sent to {recipient_email or ALERT_EMAIL} for {sensor_id}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to send email alert: {e}")
+        return False
+
+def check_thresholds(sensor_id: str, reading: dict, thresholds: dict) -> list:
+    """Check if reading violates thresholds and return list of violations"""
+    violations = []
+    
+    temp_value = reading.get('temp_value')
+    humidity = reading.get('humidity')
+    
+    if temp_value is not None:
+        if temp_value < thresholds['temp_min']:
+            violations.append(f"Temperature too low: {temp_value}°F < {thresholds['temp_min']}°F")
+        if temp_value > thresholds['temp_max']:
+            violations.append(f"Temperature too high: {temp_value}°F > {thresholds['temp_max']}°F")
+    
+    if humidity is not None:
+        if humidity < thresholds['humidity_min']:
+            violations.append(f"Humidity too low: {humidity}% < {thresholds['humidity_min']}%")
+        if humidity > thresholds['humidity_max']:
+            violations.append(f"Humidity too high: {humidity}% > {thresholds['humidity_max']}%")
+    
+    return violations
+
+def get_sensor_thresholds(sensor_id: str):
+    """Retrieve threshold configuration for a sensor from database"""
+    connection = get_db_connection()
+    if connection is None:
+        return None
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        query = """
+            SELECT sensor_id, temp_min, temp_max, humidity_min, humidity_max, email
+            FROM sensor_thresholds
+            WHERE sensor_id = %s
+        """
+        cursor.execute(query, (sensor_id,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        return result
+        
+    except Error as e:
+        print(f"Error retrieving thresholds for {sensor_id}: {e}")
+        if connection:
+            connection.close()
+        return None
+
+def save_sensor_thresholds(config: ThresholdConfig):
+    """Save or update threshold configuration for a sensor"""
+    connection = get_db_connection()
+    if connection is None:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    
+    try:
+        cursor = connection.cursor()
+        query = """
+            INSERT INTO sensor_thresholds 
+            (sensor_id, temp_min, temp_max, humidity_min, humidity_max, email, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON DUPLICATE KEY UPDATE
+            temp_min = VALUES(temp_min),
+            temp_max = VALUES(temp_max),
+            humidity_min = VALUES(humidity_min),
+            humidity_max = VALUES(humidity_max),
+            email = VALUES(email),
+            updated_at = NOW()
+        """
+        values = (
+            config.sensor_id,
+            config.temp_min,
+            config.temp_max,
+            config.humidity_min,
+            config.humidity_max,
+            config.email
+        )
+        cursor.execute(query, values)
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return True
+        
+    except Error as e:
+        print(f"Error saving thresholds: {e}")
         if connection:
             connection.close()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
@@ -418,6 +617,62 @@ async def list_sensors():
     
     except Exception as e:
         print(f"❌ Error listing sensors: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# POST endpoint to save threshold configuration
+@app.post("/thresholds", status_code=201)
+async def save_thresholds(config: ThresholdConfig):
+    """Save or update threshold configuration for a sensor"""
+    try:
+        save_sensor_thresholds(config)
+        
+        print(f"✅ Thresholds saved for {config.sensor_id}")
+        print(f"   Temp: {config.temp_min}°F - {config.temp_max}°F")
+        print(f"   Humidity: {config.humidity_min}% - {config.humidity_max}%")
+        if config.email:
+            print(f"   Alert Email: {config.email}")
+        
+        return {
+            "status": "success",
+            "message": f"Thresholds saved for {config.sensor_id}",
+            "config": {
+                "sensor_id": config.sensor_id,
+                "temp_min": config.temp_min,
+                "temp_max": config.temp_max,
+                "humidity_min": config.humidity_min,
+                "humidity_max": config.humidity_max,
+                "email": config.email
+            }
+        }
+    
+    except Exception as e:
+        print(f"❌ Error saving thresholds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# GET endpoint to retrieve threshold configuration for a sensor
+@app.get("/thresholds/{sensor_id}")
+async def get_thresholds(sensor_id: str):
+    """Get threshold configuration for a specific sensor"""
+    try:
+        thresholds = get_sensor_thresholds(sensor_id)
+        
+        if not thresholds:
+            # Return default thresholds if none configured
+            return {
+                "sensor_id": sensor_id,
+                "temp_min": 32.0,
+                "temp_max": 100.0,
+                "humidity_min": 20.0,
+                "humidity_max": 80.0,
+                "email": None,
+                "configured": False
+            }
+        
+        thresholds['configured'] = True
+        return thresholds
+    
+    except Exception as e:
+        print(f"❌ Error getting thresholds for {sensor_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
